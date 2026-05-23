@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  scroll-behavior: smooth;
+}
+
+@layer base {
+  :root {
+    --color-primary: #E8752A;
+    --color-primary-dark: #9C4400;
+    --color-primary-container: #FFDBCA;
+    --color-secondary: #1A1A2E;
+    --color-secondary-container: #E2E0FC;
+    --color-tertiary: #BD8D00;
+    --color-background: #F9F9FF;
+    --color-surface: #FFFFFF;
+    --color-surface-container: #E7EEFE;
+    --color-on-surface: #151C27;
+    --color-on-surface-variant: #574238;
+    --color-outline: #8A7266;
+    --color-outline-variant: #DEC1B3;
+    --color-error: #BA1A1A;
+    --color-error-container: #FFDAD6;
+    --color-success: #2D8B4E;
+    --color-warning: #F5A623;
+    --color-on-primary: #FFFFFF;
+  }
+
+  .dark {
+    --color-primary: #F69E52;
+    --color-primary-dark: #FFDBCA;
+    --color-primary-container: #5C2E00;
+    --color-secondary: #C8C5FF;
+    --color-secondary-container: #2D2B57;
+    --color-tertiary: #F5C842;
+    --color-background: #0F0F1A;
+    --color-surface: #1C1C2E;
+    --color-surface-container: #252540;
+    --color-on-surface: #E6E1E5;
+    --color-on-surface-variant: #CAB9AE;
+    --color-outline: #9B8579;
+    --color-outline-variant: #3D2E26;
+    --color-error: #FFB4AB;
+    --color-error-container: #690005;
+    --color-success: #6DD98A;
+    --color-warning: #FFD580;
+    --color-on-primary: #1A1A2E;
+  }
+}
+
+@layer utilities {
+  .text-headline-xl {
+    @apply text-[32px] font-[800] leading-[40px];
+  }
+  .text-headline-lg {
+    @apply text-[24px] font-[700] leading-[32px];
+  }
+  .text-headline-md {
+    @apply text-[18px] font-[700] leading-[24px];
+  }
+  .text-body-lg {
+    @apply text-[16px] font-[400] leading-[24px];
+  }
+  .text-body-md {
+    @apply text-[14px] font-[400] leading-[20px];
+  }
+  .text-label-md {
+    @apply text-[12px] font-[600] leading-[16px];
+  }
+}
+
+/* Hide scrollbar for clean UI but keep functionality */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
