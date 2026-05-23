@@ -250,8 +250,8 @@ The database comes pre-seeded with test accounts:
 
 | Role | Email | Password |
 |------|-------|----------|
-| Admin (Mess Owner) | `owner@annapurna.com` | `admin123` |
-| Student | `abhijeet@example.com` | `student123` |
+| Admin (Mess Owner) | `xyz@annapurna.com` | `admin123` |
+| Student | `xyz@example.com` | `student123` |
 
 **Mess:** Annapurna Mess, Kothrud, Pune — Rating: 4.5 ⭐
 
