@@ -1,10 +1,10 @@
-# 🍽️ MessMate — Student Mess Pre-Order Web App
+# MessMate — Student Mess Pre-Order Web App
 
-> A full-stack web application that lets students pre-order meals from their mess, track orders in real time, and manage subscriptions — while giving mess owners complete control over their menu, slots, and operations.
+> 🍽️ A full-stack web application that lets students pre-order meals from their mess, track orders in real time, and manage subscriptions — while giving mess owners complete control over their menu, slots, and operations.
 
 ---
 
-## 📌 Table of Contents
+## Table of Contents
 
 - [Overview](#overview)
 - [Features](#features)
@@ -13,7 +13,7 @@
 - [Getting Started](#getting-started)
 - [Environment Variables](#environment-variables)
 - [API Routes](#api-routes)
-- [Roles & Access](#roles--access)
+- [Roles and Access](#roles-and-access)
 - [Seed Data](#seed-data)
 - [License](#license)
 
@@ -25,9 +25,9 @@ MessMate is a **student mess pre-order system** built for college hostels and PG
 
 ---
 
-## ✨ Features
+## Features
 
-### 👨‍🎓 Student
+### Student
 - Browse and discover mess listings
 - Subscribe to monthly meal plans (Gold / Silver / Bronze)
 - Place pre-orders in a 3-step flow (menu → slot → confirm)
@@ -36,7 +36,7 @@ MessMate is a **student mess pre-order system** built for college hostels and PG
 - Rate individual dishes after order completion
 - Dark mode toggle
 
-### 🏠 Mess Owner (Admin)
+### Mess Owner (Admin)
 - Dashboard with analytics and revenue insights
 - Manage menu items (add / edit / delete)
 - Configure time slots for meal pickup
@@ -48,12 +48,13 @@ MessMate is a **student mess pre-order system** built for college hostels and PG
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 ### Frontend
+
 | Tech | Purpose |
 |------|---------|
-| React 18 + Vite | UI framework & build tool |
+| React 18 + Vite | UI framework and build tool |
 | Tailwind CSS | Utility-first styling |
 | React Router v6 | Client-side routing |
 | Axios | HTTP client with JWT interceptors |
@@ -62,6 +63,7 @@ MessMate is a **student mess pre-order system** built for college hostels and PG
 | Context API | Auth, Order, Theme state management |
 
 ### Backend
+
 | Tech | Purpose |
 |------|---------|
 | Node.js + Express | REST API server (port 5000) |
@@ -72,7 +74,7 @@ MessMate is a **student mess pre-order system** built for college hostels and PG
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 MessMate-Web-App/
@@ -164,7 +166,7 @@ MessMate-Web-App/
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - Node.js v18+
@@ -202,7 +204,7 @@ npm run dev
 
 ---
 
-## 🔐 Environment Variables
+## Environment Variables
 
 Create a `.env` file inside the `backend/` folder:
 
@@ -218,7 +220,7 @@ RAZORPAY_WEBHOOK_SECRET=your_webhook_secret
 
 ---
 
-## 📡 API Routes
+## API Routes
 
 | Group | Base Path | Description |
 |-------|-----------|-------------|
@@ -226,11 +228,11 @@ RAZORPAY_WEBHOOK_SECRET=your_webhook_secret
 | Mess | `/api/mess` | Browse messes, menu, ratings |
 | Student | `/api/student` | Orders, subscriptions, profile |
 | Admin | `/api/admin` | Menu CRUD, queue, subscribers, billing |
-| Payment | `/api/payment` | Razorpay order creation & webhook |
+| Payment | `/api/payment` | Razorpay order creation and webhook |
 
 ---
 
-## 👥 Roles & Access
+## Roles and Access
 
 | Role | Description |
 |------|-------------|
@@ -242,7 +244,7 @@ JWT tokens carry `role` and `mess_id` in the payload. Role-based access is enfor
 
 ---
 
-## 🌱 Seed Data
+## Seed Data
 
 The database comes pre-seeded with test accounts:
 
@@ -263,7 +265,8 @@ The database comes pre-seeded with test accounts:
 ---
 
 
-## 📄 License
+
+## License
 
 This project is built as an academic project for MCA Semester II.  
 Not licensed for commercial use.
