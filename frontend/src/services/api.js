@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // ─── Axios instance pointing at our Express backend ──────────────────────────
 const api = axios.create({
-  baseURL: 'http://localhost:5000/api',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -18,14 +18,37 @@ api.interceptors.request.use((config) => {
 // ─── Response interceptor — handle 401 globally ──────────────────────────────
 api.interceptors.response.use(
   (response) => response.data,
-  (error) => {
+  async (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('messmate_token');
-      localStorage.removeItem('messmate_user');
-      window.location.href = '/student/login';
+      const originalRequest = error.config;
+      if (!originalRequest._retry) {
+        originalRequest._retry = true;
+        try {
+          const refreshData = await api.post('/auth/refresh');
+          const newToken = refreshData.token;
+          localStorage.setItem('messmate_token', newToken);
+          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+          return api(originalRequest);
+        } catch {
+          localStorage.removeItem('messmate_token');
+          localStorage.removeItem('messmate_user');
+          window.location.href = '/student/login';
+        }
+      } else {
+        localStorage.removeItem('messmate_token');
+        localStorage.removeItem('messmate_user');
+        window.location.href = '/student/login';
+      }
     }
-    const message = error.response?.data?.error || error.message || 'An error occurred';
-    return Promise.reject(new Error(message));
+    const enrichedError = new Error(
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.message ||
+      'An error occurred'
+    );
+    enrichedError.response = error.response;
+    enrichedError.status = error.response?.status;
+    return Promise.reject(enrichedError);
   }
 );
 
@@ -86,6 +109,8 @@ export const orderService = {
 
   getOrderById: (id) => api.get(`/student/orders/${id}`),
 
+  getOrdersByDate: (date) => api.get(`/student/orders/by-date?date=${date}`),
+
   placeOrder: (orderData) => api.post('/student/orders', orderData),
 
   // Admin order management
@@ -121,12 +146,16 @@ export const userService = {
 
   getSubscription: () => api.get('/student/subscription'),
 
-  subscribe: (planId, messId) => api.post('/student/subscription/subscribe', { planId, messId }),
+  subscribe: (planId, messId, paymentId) => api.post('/student/subscription/subscribe', { planId, messId, paymentId }),
 
   getAttendance: (month) => api.get(`/student/attendance?month=${month}`),
 
   submitReview: (orderId, menuItemId, rating, comment) =>
     api.post('/student/reviews', { orderId, menuItemId, rating, comment }),
+
+  // Profile settings
+  updateName: (name) => api.put('/student/profile/name', { name }),
+  resetPassword: (currentPassword, newPassword) => api.put('/student/profile/password', { currentPassword, newPassword }),
 };
 
 // ─── Admin Service ────────────────────────────────────────────────────────────
@@ -162,7 +191,7 @@ export const adminService = {
     const query = params.toString() ? `?${params}` : '';
     return api.get(`/admin/billing${query}`);
   },
-  exportBillingCSV: () => `http://localhost:5000/api/admin/billing/export`,
+  exportBillingCSV: () => api.get('/admin/billing/export', { responseType: 'blob' }),
 
   // Postpaid tracking
   getPostpaidOrders: () => api.get('/admin/orders/postpaid'),
@@ -180,6 +209,11 @@ export const adminService = {
 
   // Reviews
   getReviews: () => api.get('/admin/reviews'),
+
+  // Owner profile settings
+  updateOwnerName: (name) => api.put('/admin/profile/name', { name }),
+  resetOwnerPassword: (currentPassword, newPassword) => api.put('/admin/profile/password', { currentPassword, newPassword }),
+  updateMessDetails: (data) => api.put('/admin/mess/details', data),
 };
 
 export default api;

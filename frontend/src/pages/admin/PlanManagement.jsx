@@ -180,7 +180,7 @@ const PlanManagement = () => {
             <p className="text-body-md text-on-surface-variant">Are you sure you want to delete this subscription plan? Active subscriptions will not be deleted, but no new users can subscribe to it.</p>
             <div className="flex gap-3 mt-2">
               <button onClick={() => setDeleteConfirm(null)} className="flex-1 py-3 rounded-pill font-bold border border-outline-variant text-on-surface hover:bg-surface-container transition-colors">Cancel</button>
-              <button onClick={confirmDelete} className="flex-1 py-3 rounded-pill font-bold bg-error text-white hover:bg-error/90 transition-colors">Delete</button>
+              <button onClick={confirmDelete} className="flex-1 py-3 rounded-pill font-bold bg-red-500 text-white hover:bg-red-600 transition-colors">Delete</button>
             </div>
           </div>
         </div>

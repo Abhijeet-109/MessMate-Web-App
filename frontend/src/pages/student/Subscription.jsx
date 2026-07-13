@@ -4,7 +4,7 @@ import { userService, messService, orderService } from '../../services/api';
 import { BottomNav } from '../../components/shared/BottomNav';
 import { SubscriptionPlanCard } from '../../components/shared/SubscriptionPlanCard';
 import { ConfirmationModal } from '../../components/shared/ConfirmationModal';
-import { CreditCard, CheckCircle2, ChevronLeft, ChevronRight, CalendarDays, ShieldCheck, Sparkles, Store } from 'lucide-react';
+import { CreditCard, CheckCircle2, ChevronLeft, ChevronRight, CalendarDays, ShieldCheck, Sparkles, Store, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const Subscription = () => {
@@ -30,6 +30,24 @@ const Subscription = () => {
   const now = new Date();
   const [calYear, setCalYear] = useState(now.getFullYear());
   const [calMonth, setCalMonth] = useState(now.getMonth());
+
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [dateOrders, setDateOrders] = useState([]);
+  const [loadingDateOrders, setLoadingDateOrders] = useState(false);
+  const [showDateModal, setShowDateModal] = useState(false);
+
+  const fetchDateOrders = async (dateStr) => {
+    setLoadingDateOrders(true);
+    setDateOrders([]);
+    try {
+      const data = await orderService.getOrdersByDate(dateStr);
+      setDateOrders(data);
+    } catch (e) {
+      setDateOrders([]);
+    } finally {
+      setLoadingDateOrders(false);
+    }
+  };
 
   // Fetch subscription + all messes on mount
   useEffect(() => {
@@ -150,7 +168,7 @@ const Subscription = () => {
 
       // Step 4 — Activate subscription
       setPayLoadingText('Activating your plan...');
-      await userService.subscribe(selectedPlan.id, messId);
+      await userService.subscribe(selectedPlan.id, messId, razorpayResponse.razorpay_payment_id);
 
       setSuccessPlanName(selectedPlan.name);
       setPayLoading(false);
@@ -185,8 +203,6 @@ const Subscription = () => {
     const day = parseInt(a.date.split('-')[2], 10);
     attendanceMap[day] = a.status;
   });
-  const attendedCount = Object.values(attendanceMap).filter(s => s === 'attended').length;
-  const noShowCount = Object.values(attendanceMap).filter(s => s === 'no-show').length;
   const isActive = sub?.isActive || sub?.status === 'active';
 
   const selectedMessName = allMesses.find(m => m.id === selectedMessId)?.name || '';
@@ -307,19 +323,19 @@ const Subscription = () => {
                     onClick={() => setSelectedMessId(mess.id)}
                     className={`flex-shrink-0 flex items-center gap-2.5 px-5 py-3 rounded-2xl border-2 font-bold text-sm transition-all ${
                       selectedMessId === mess.id
-                        ? 'border-primary bg-primary/10 text-primary-dark shadow-sm'
+                        ? 'border-primary bg-primary text-white shadow-sm'
                         : 'border-outline-variant bg-surface text-on-surface-variant hover:border-primary/40'
                     }`}
                   >
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-extrabold ${
-                      selectedMessId === mess.id ? 'bg-primary text-white' : 'bg-surface-container text-on-surface-variant'
+                      selectedMessId === mess.id ? 'bg-white text-primary' : 'bg-surface-container text-on-surface-variant'
                     }`}>
                       {mess.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)}
                     </div>
                     <div className="flex flex-col items-start">
                       <span className="leading-tight">{mess.name}</span>
                       {mess.rating > 0 && (
-                        <span className="text-[10px] font-normal text-on-surface-variant">⭐ {mess.rating}</span>
+                        <span className={`text-[10px] font-normal ${selectedMessId === mess.id ? 'text-white/80' : 'text-on-surface-variant'}`}>⭐ {mess.rating}</span>
                       )}
                     </div>
                   </button>
@@ -361,6 +377,30 @@ const Subscription = () => {
             <h2 className="text-headline-md font-bold text-on-surface flex items-center gap-2 mb-2">
               <CalendarDays className="w-5 h-5 text-secondary" /> Attendance
             </h2>
+            
+            {/* No-show KPI Card */}
+            {(sub.noShowCount ?? 0) > 0 && (
+              <div className="bg-warning/10 border border-warning/30 rounded-2xl p-4 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-warning/20 flex items-center justify-center">
+                    <AlertTriangle className="w-5 h-5 text-warning" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-on-surface text-sm">Postpaid No-shows</p>
+                    <p className="text-xs text-on-surface-variant mt-0.5">
+                      {sub.noShowCount ?? 0} of {sub.maxNoShows ?? 0} allowed misses used
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-2xl font-extrabold text-warning">{sub.noShowCount ?? 0}/{sub.maxNoShows ?? 0}</p>
+                  {(sub.noShowCount ?? 0) >= (sub.maxNoShows ?? 0) && (
+                    <p className="text-[10px] font-bold text-error uppercase tracking-wide mt-0.5">Postpaid Blocked</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-between bg-surface-container rounded-pill p-1 max-w-[250px] mx-auto mb-2">
               <button onClick={prevMonth} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white text-on-surface">
                 <ChevronLeft className="w-4 h-4"/>
@@ -370,6 +410,7 @@ const Subscription = () => {
                 <ChevronRight className="w-4 h-4"/>
               </button>
             </div>
+            
             <div className="w-full overflow-x-auto no-scrollbar pb-4">
               <div className="min-w-[340px] md:w-full max-w-[600px] mx-auto">
                 <div className="grid grid-cols-7 gap-2 mb-2 text-center text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">
@@ -387,31 +428,27 @@ const Subscription = () => {
                     else if (status === 'no-show') { colorClass = "bg-error text-white border-transparent shadow-sm"; showDay = false; }
                     else if (isCurrentMonth && day === today.getDate()) { colorClass = "bg-surface border-2 border-warning text-warning font-bold"; }
                     return (
-                      <div
+                      <button
                         key={day}
-                        className={`w-7 h-7 md:w-9 md:h-9 rounded-full flex items-center justify-center text-[12px] md:text-sm font-semibold transition-all ${colorClass} ${isTodayDate ? 'ring-2 ring-primary ring-offset-2' : ''}`}
+                        onClick={() => {
+                          const dateString = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                          setSelectedDate(dateString);
+                          setShowDateModal(true);
+                          fetchDateOrders(dateString);
+                        }}
+                        className={`w-7 h-7 md:w-9 md:h-9 rounded-full flex items-center justify-center text-[12px] md:text-sm font-semibold transition-all hover:scale-110 active:scale-95 ${colorClass} ${isTodayDate ? 'ring-2 ring-primary ring-offset-2' : ''}`}
                         title={status ? `${status} on ${day}` : ''}
                       >
                         {showDay ? day : (status === 'attended' ? '✓' : '✗')}
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
               </div>
             </div>
-            <div className="flex flex-col md:flex-row items-center justify-between mt-4 pt-4 border-t border-outline-variant gap-4">
-              <div className="flex flex-wrap items-center justify-center gap-4 text-[12px] font-bold text-on-surface-variant">
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-success"></div> Attended</div>
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-error"></div> No-show</div>
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full border-2 border-warning"></div> Today</div>
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-surface-container"></div> No Order</div>
-              </div>
-              <div className="flex items-center gap-4 text-sm font-bold bg-background px-4 py-2 rounded-lg border border-outline-variant">
-                <div>Attended: <span className="text-success ml-1">{attendedCount}</span></div>
-                <div className="w-px h-4 bg-outline-variant"></div>
-                <div>No-shows: <span className="text-error ml-1">{noShowCount}</span></div>
-              </div>
-            </div>
+            <p className="text-xs text-on-surface-variant text-center mt-2">
+              Tap any date to see your orders for that day
+            </p>
           </section>
         )}
       </main>
@@ -427,6 +464,76 @@ const Subscription = () => {
       />
 
       <BottomNav variant="student" />
+
+      {/* Date Detail Modal */}
+      {showDateModal && (
+        <div
+          className="fixed inset-0 z-[120] flex items-end justify-center bg-black/50"
+          onClick={() => setShowDateModal(false)}
+        >
+          <div
+            className="bg-surface w-full max-w-lg rounded-t-3xl p-6 pb-10 flex flex-col gap-4 max-h-[70vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <h3 className="font-extrabold text-on-surface text-lg">
+                {selectedDate ? new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-IN', {
+                  weekday: 'long', day: 'numeric', month: 'long'
+                }) : ''}
+              </h3>
+              <button
+                onClick={() => setShowDateModal(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-surface-container text-on-surface-variant font-bold hover:bg-outline-variant transition-colors"
+              >✕</button>
+            </div>
+
+            {/* Content */}
+            {loadingDateOrders ? (
+              <div className="flex justify-center py-8">
+                <div className="w-8 h-8 rounded-full border-4 border-primary border-t-transparent animate-spin"></div>
+              </div>
+            ) : dateOrders.length === 0 ? (
+              <div className="text-center py-8 text-on-surface-variant text-sm">
+                No orders placed on this day
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {dateOrders.map((order) => (
+                  <div key={order.id} className="bg-surface-container rounded-2xl p-4 flex flex-col gap-2 shadow-sm border border-outline-variant">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-on-surface text-sm">{order.mess_name}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${
+                        order.status === 'Completed' ? 'bg-success/20 text-success' :
+                        order.status === 'No-show' ? 'bg-error/20 text-error' :
+                        order.status === 'Cancelled' ? 'bg-outline/20 text-on-surface-variant' :
+                        'bg-primary/20 text-primary'
+                      }`}>{order.status}</span>
+                    </div>
+                    <div className="text-xs text-on-surface-variant capitalize">
+                      {order.meal_type} • {order.order_type} • {order.slot_time}
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      {order.items?.map((item, i) => (
+                        <div key={i} className="flex justify-between text-xs text-on-surface">
+                          <span>{item.quantity}x {item.name}</span>
+                          <span className="text-on-surface-variant">₹{item.price * item.quantity}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex justify-between items-center pt-2 mt-1 border-t border-outline-variant">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                        {order.payment_method}
+                      </span>
+                      <span className="font-extrabold text-on-surface text-sm">₹{order.total}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,3 +1,4 @@
+// WARNING: This file is unused in production. All data comes from api.js.
 // Mock data representing the backend database for MessMate
 
 export const MESS_DATA = [

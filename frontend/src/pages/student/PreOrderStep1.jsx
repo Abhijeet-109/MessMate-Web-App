@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useOrder } from '../../context/OrderContext';
+import { useAuth } from '../../context/AuthContext';
 import { ArrowLeft, Plus, Minus, Info } from 'lucide-react';
 
 const PreOrderStep1 = () => {
   const navigate = useNavigate();
   const { currentOrder, updateItems } = useOrder();
+  const { user } = useAuth();
   const [quantities, setQuantities] = useState({});
 
   useEffect(() => {
@@ -15,6 +17,8 @@ const PreOrderStep1 = () => {
   }, [currentOrder, navigate]);
 
   if (!currentOrder) return null;
+
+  const isSubscriber = user?.mess_id === currentOrder?.mess?.id;
 
   const mealType = currentOrder.slot?.mealType || 'lunch';
   const menuItems = currentOrder.mess?.menu?.[mealType] || [];
@@ -56,12 +60,14 @@ const PreOrderStep1 = () => {
 
       <main className="flex-1 overflow-y-auto py-6">
         <div className="max-w-2xl mx-auto px-6 w-full flex flex-col gap-4">
-          <div className="bg-primary-container/30 px-4 py-3 rounded-xl border border-primary-container flex items-start gap-3">
-            <Info className="w-5 h-5 text-primary mt-0.5 shrink-0" />
-            <p className="text-body-md text-primary-dark">
-              Since you have an active Subscription Pass for this mess, your standard Thali is already covered. You can add extras here.
-            </p>
-          </div>
+          {isSubscriber && (
+            <div className="bg-primary-container/30 px-4 py-3 rounded-xl border border-primary-container flex items-start gap-3">
+              <Info className="w-5 h-5 text-primary mt-0.5 shrink-0" />
+              <p className="text-body-md text-primary-dark">
+                Since you have an active Subscription Pass for this mess, your standard Thali is already covered. You can add extras here.
+              </p>
+            </div>
+          )}
 
           <div className="flex flex-col gap-4 mt-2">
             {menuItems.map(item => (

@@ -77,7 +77,7 @@ const SubscriberManagement = () => {
         ) : (
           <>
             {/* DESKTOP TABLE */}
-            <div className="hidden md:block bg-surface rounded-2xl border border-outline-variant shadow-sm overflow-hidden">
+            <div className="hidden md:block bg-surface rounded-2xl border border-outline-variant shadow-sm overflow-visible">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-surface-container border-b border-outline-variant text-label-md uppercase tracking-wider text-on-surface-variant">

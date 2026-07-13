@@ -102,7 +102,7 @@ const Dashboard = () => {
               ) : (
                 <div className="bg-surface-container border-2 border-outline-variant border-dashed px-6 py-4 rounded-[24px] flex flex-col items-center justify-center gap-2 text-center h-[120px]">
                   <span className="text-body-md font-bold text-on-surface-variant">No Active Pass</span>
-                  <button onClick={() => navigate('/student/subscription')} className="text-primary font-bold px-6 py-2 rounded-pill border-2 border-primary">Buy a Pass</button>
+                  <button onClick={() => navigate('/student/subscription')} className="text-white bg-primary font-bold px-6 py-2 rounded-pill border-2 border-primary">Buy a Pass</button>
                 </div>
               )}
             </section>

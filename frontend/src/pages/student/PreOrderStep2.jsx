@@ -1,11 +1,13 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useOrder } from '../../context/OrderContext';
+import { useAuth } from '../../context/AuthContext';
 import { ArrowLeft, Edit2, UtensilsCrossed, Clock, Receipt } from 'lucide-react';
 
 const PreOrderStep2 = () => {
   const navigate = useNavigate();
   const { currentOrder } = useOrder();
+  const { user } = useAuth();
 
   useEffect(() => {
     if (!currentOrder) {
@@ -14,6 +16,8 @@ const PreOrderStep2 = () => {
   }, [currentOrder, navigate]);
 
   if (!currentOrder) return null;
+
+  const isSubscriber = user?.mess_id === currentOrder?.mess?.id;
 
   return (
     <div className="flex-1 flex flex-col bg-background relative pb-24 md:pb-0">
@@ -65,10 +69,12 @@ const PreOrderStep2 = () => {
             </div>
 
             <div className="flex flex-col gap-3">
-              <div className="flex justify-between items-start text-body-md">
-                <span className="text-on-surface">Standard Subscription Thali <span className="text-success font-bold">(Paid via Pass)</span></span>
-                <span className="font-bold text-on-surface">1x</span>
-              </div>
+              {isSubscriber && (
+                <div className="flex justify-between items-start text-body-md">
+                  <span className="text-on-surface">Standard Subscription Thali <span className="text-success font-bold">(Paid via Pass)</span></span>
+                  <span className="font-bold text-on-surface">1x</span>
+                </div>
+              )}
               
               {currentOrder.items.map(item => (
                 <div key={item.id} className="flex justify-between items-start text-body-md">

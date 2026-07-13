@@ -176,7 +176,7 @@ const LiveOrderQueue = () => {
                       </button>
                     )}
                     {/* No-show button for ALL active subscription orders */}
-                    {['Placed','Accepted','Preparing','Ready'].includes(order.status) && order.paymentMethod === 'Subscription' && (
+                    {['Placed','Accepted','Preparing','Ready'].includes(order.status) && order.paymentMethod === 'Pay on Site' && (
                       <button
                         onClick={() => handleStatusChange(order.id, 'No-show')}
                         className="flex-1 py-2.5 rounded-pill font-bold text-label-md border-2 border-warning text-warning hover:bg-warning/10 transition-colors flex items-center justify-center gap-1.5"
@@ -192,7 +192,7 @@ const LiveOrderQueue = () => {
                       >
                         <Wallet className="w-4 h-4" /> Collect ₹{order.total} & Complete
                       </button>
-                    ) : flow && (
+                    ) : flow && !(order.paymentMethod === 'Pay on Site' && order.status === 'Ready') && (
                       <button
                         onClick={() => handleStatusChange(order.id, flow.next)}
                         className={`flex-1 py-2.5 rounded-pill font-bold text-label-md ${flow.color} hover:opacity-90 transition-all flex items-center justify-center gap-1.5`}

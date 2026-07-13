@@ -8,7 +8,7 @@ import ThemeToggle from '../../components/shared/ThemeToggle';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar } from 'recharts';
 
 const PERIOD_MAP = { 'Today': 'today', 'This Week': 'week', 'This Month': 'month' };
-const PIE_COLORS = ['#F5A623', '#E8752A', '#1A1A2E'];
+const PIE_COLORS = ['#F5A623', '#E8752A', '#FCD34D'];
 
 const AdminDashboard = () => {
   const { user } = useAuth();
@@ -52,7 +52,7 @@ const AdminDashboard = () => {
   // Derived chart data
   const mealTypeData = data?.mealTypeStats?.map((m, i) => ({
     name: m.meal_type?.charAt(0).toUpperCase() + m.meal_type?.slice(1),
-    value: m.count,
+    value: Number(m.count),
     color: PIE_COLORS[i % PIE_COLORS.length]
   })) || [];
 
@@ -136,7 +136,7 @@ const AdminDashboard = () => {
                   <button 
                     key={range}
                     onClick={() => setDateRange(range)}
-                    className={`px-4 py-1.5 rounded-pill text-[12px] font-bold whitespace-nowrap transition-colors ${dateRange === range ? 'bg-white shadow-sm text-primary-dark' : 'text-on-surface-variant hover:bg-white/50'}`}
+                    className={`px-4 py-1.5 rounded-pill text-[12px] font-bold whitespace-nowrap transition-colors ${dateRange === range ? 'bg-primary shadow-sm text-white' : 'text-on-surface-variant hover:bg-white/50'}`}
                   >
                     {range}
                   </button>
@@ -179,10 +179,12 @@ const AdminDashboard = () => {
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={revenueTrend} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#DEC1B3" opacity={0.5} />
-                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#574238' }} dy={10} minTickGap={20} />
-                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#574238' }} tickFormatter={v => `₹${v/1000}k`} />
+                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#9ca3af' }} dy={10} minTickGap={20} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#9ca3af' }} tickFormatter={(value) => `₹${value}`} domain={[0, 'auto']} allowDecimals={false} />
                         <RechartsTooltip 
-                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', padding: '12px' }}
+                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', padding: '12px', backgroundColor: '#1e293b', color: '#f1f5f9' }}
+                          labelStyle={{ color: '#9ca3af' }}
+                          itemStyle={{ color: '#f1f5f9' }}
                           formatter={v => [`₹${v}`, 'Revenue']}
                         />
                         <Line type="monotone" dataKey="revenue" stroke="#E8752A" strokeWidth={3} dot={false} activeDot={{ r: 6, fill: '#E8752A', stroke: '#fff', strokeWidth: 2 }} />

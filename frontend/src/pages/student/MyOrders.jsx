@@ -29,15 +29,15 @@ const MyOrders = () => {
         <h1 className="text-headline-lg font-extrabold text-on-surface mb-4 md:hidden">My Orders</h1>
         
         <div className="flex bg-surface-container rounded-pill p-1 relative">
-          <div className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-white shadow-sm rounded-pill transition-transform duration-300 ${tab === 'past' ? 'translate-x-full left-1' : 'left-1'}`}></div>
+          <div className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-primary shadow-sm rounded-pill transition-transform duration-300 ${tab === 'past' ? 'translate-x-full left-1' : 'left-1'}`}></div>
           <button 
-            className={`flex-1 py-2 rounded-pill text-body-md font-bold transition-colors relative z-10 ${tab === 'active' ? 'text-primary-dark' : 'text-on-surface-variant'}`}
+            className={`flex-1 py-2 rounded-pill text-body-md font-bold transition-colors relative z-10 ${tab === 'active' ? 'text-white' : 'text-on-surface-variant'}`}
             onClick={() => setTab('active')}
           >
             Active
           </button>
           <button 
-            className={`flex-1 py-2 rounded-pill text-body-md font-bold transition-colors relative z-10 ${tab === 'past' ? 'text-primary-dark' : 'text-on-surface-variant'}`}
+            className={`flex-1 py-2 rounded-pill text-body-md font-bold transition-colors relative z-10 ${tab === 'past' ? 'text-white' : 'text-on-surface-variant'}`}
             onClick={() => setTab('past')}
           >
             Past History

@@ -91,11 +91,11 @@ const MessDetail = () => {
           
           <div className="flex bg-surface-container rounded-pill p-1">
             <button 
-              className={clsx("flex-1 py-2 rounded-pill text-body-md font-bold transition-all", orderType === 'Dine-in' ? 'bg-white shadow-sm text-primary-dark' : 'text-on-surface-variant')}
+              className={clsx("flex-1 py-2 rounded-pill text-body-md font-bold transition-all", orderType === 'Dine-in' ? 'bg-primary shadow-sm text-white' : 'text-on-surface-variant')}
               onClick={() => setOrderType('Dine-in')}
             >Dine-in</button>
             <button 
-              className={clsx("flex-1 py-2 rounded-pill text-body-md font-bold transition-all", orderType === 'Parcel' ? 'bg-white shadow-sm text-primary-dark' : 'text-on-surface-variant')}
+              className={clsx("flex-1 py-2 rounded-pill text-body-md font-bold transition-all", orderType === 'Parcel' ? 'bg-primary shadow-sm text-white' : 'text-on-surface-variant')}
               onClick={() => setOrderType('Parcel')}
             >Parcel</button>
           </div>

@@ -4,16 +4,29 @@ import { BottomNav } from '../../components/shared/BottomNav';
 import { Toast } from '../../components/shared/Toast';
 import { adminService } from '../../services/api';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Store, ChevronDown, ChevronUp, Save, MapPin, Phone, Clock, Sparkles, Image, Loader2 } from 'lucide-react';
+import { LogOut, Store, ChevronDown, ChevronUp, Save, MapPin, Phone, Clock, Sparkles, Image, Loader2, User, Lock, Settings } from 'lucide-react';
 
 const AdminProfile = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
 
+  const [showAccountSettings, setShowAccountSettings] = useState(false);
   const [showMessSetup, setShowMessSetup] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
+
+  // Account Settings — Change Name
+  const [ownerName, setOwnerName] = useState(user?.name || '');
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameMsg, setNameMsg] = useState(null);
+
+  // Account Settings — Reset Password
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwMsg, setPwMsg] = useState(null);
 
   // Mess detail form state
   const [messData, setMessData] = useState({
@@ -26,6 +39,10 @@ const AdminProfile = () => {
     hoursLunch: '',
     hoursDinner: '',
   });
+
+  // Mess details save state
+  const [messDetailsSaving, setMessDetailsSaving] = useState(false);
+  const [messDetailsMsg, setMessDetailsMsg] = useState(null);
 
   // Thumbnail preview image options
   const presetImages = [
@@ -86,6 +103,77 @@ const AdminProfile = () => {
     }
   };
 
+  const handleMessDetailsSave = async () => {
+    setMessDetailsMsg(null);
+    if (!messData.name || messData.name.trim().length < 2) {
+      setMessDetailsMsg({ text: 'Mess name must be at least 2 characters.', type: 'error' });
+      return;
+    }
+    setMessDetailsSaving(true);
+    try {
+      const res = await adminService.updateMessDetails({
+        messName: messData.name.trim(),
+        location: messData.location || '',
+        contact: messData.contact || '',
+        hoursBreakfast: messData.hoursBreakfast || '',
+        hoursLunch: messData.hoursLunch || '',
+        hoursDinner: messData.hoursDinner || '',
+        todaysSpecial: messData.todaysSpecial || '',
+      });
+      setMessDetailsMsg({ text: res.message || 'Mess details updated', type: 'success' });
+    } catch (err) {
+      setMessDetailsMsg({ text: err.message || 'Failed to update mess details.', type: 'error' });
+    } finally {
+      setMessDetailsSaving(false);
+    }
+  };
+
+  const handleNameSave = async () => {
+    setNameMsg(null);
+    if (!ownerName || ownerName.trim().length < 2) {
+      setNameMsg({ text: 'Name must be at least 2 characters.', type: 'error' });
+      return;
+    }
+    setNameSaving(true);
+    try {
+      const res = await adminService.updateOwnerName(ownerName.trim());
+      updateUser({ name: ownerName.trim() });
+      setNameMsg({ text: res.message || 'Name updated successfully.', type: 'success' });
+    } catch (err) {
+      setNameMsg({ text: err.message || 'Failed to update name.', type: 'error' });
+    } finally {
+      setNameSaving(false);
+    }
+  };
+
+  const handlePasswordSave = async () => {
+    setPwMsg(null);
+    if (!currentPassword || !newPassword) {
+      setPwMsg({ text: 'Both current and new password are required.', type: 'error' });
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPwMsg({ text: 'New password must be at least 6 characters.', type: 'error' });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPwMsg({ text: 'Passwords do not match.', type: 'error' });
+      return;
+    }
+    setPwSaving(true);
+    try {
+      const res = await adminService.resetOwnerPassword(currentPassword, newPassword);
+      setPwMsg({ text: res.message || 'Password updated', type: 'success' });
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err) {
+      setPwMsg({ text: err.message || 'Failed to update password.', type: 'error' });
+    } finally {
+      setPwSaving(false);
+    }
+  };
+
   const handleLogout = () => {
     logout();
     navigate('/');
@@ -112,9 +200,117 @@ const AdminProfile = () => {
           <p className="text-body-md text-on-surface-variant bg-surface-container px-3 py-1 rounded-pill mt-2">Owner: {messData.name || 'Your Mess'}</p>
         </div>
 
+        {/* Account Settings */}
+        <div className="flex flex-col gap-2">
+          <div className="bg-surface rounded-2xl shadow-sm border border-outline-variant">
+            
+            {/* Toggle Button */}
+            <button 
+              onClick={() => setShowAccountSettings(prev => !prev)}
+              className="w-full flex items-center justify-between p-4 border-b border-outline-variant hover:bg-surface-container transition-colors text-left"
+            >
+              <div className="flex items-center gap-4">
+                <Settings className="w-5 h-5 text-primary" />
+                <span className="text-body-md text-on-surface font-bold">Account Settings</span>
+              </div>
+              {showAccountSettings 
+                ? <ChevronUp className="w-5 h-5 text-outline" />
+                : <ChevronDown className="w-5 h-5 text-outline" />
+              }
+            </button>
+
+            {/* Expandable Account Settings Form */}
+            {showAccountSettings && (
+              <div className="p-5 flex flex-col gap-5 border-b border-outline-variant animate-fadeIn">
+                
+                {/* Change Name */}
+                <div>
+                  <label className="text-label-lg font-bold text-on-surface flex items-center gap-2 mb-2">
+                    <User className="w-4 h-4 text-primary" />
+                    Change Name
+                  </label>
+                  <input
+                    type="text"
+                    value={ownerName}
+                    onChange={e => setOwnerName(e.target.value)}
+                    placeholder="Enter your name"
+                    className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant text-body-md text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                  />
+                  {nameMsg && (
+                    <p className={`text-label-sm mt-1 ${nameMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                      {nameMsg.text}
+                    </p>
+                  )}
+                  <button
+                    onClick={handleNameSave}
+                    disabled={nameSaving}
+                    className="mt-3 flex items-center justify-center gap-2 bg-primary text-on-primary font-bold py-2.5 px-5 rounded-xl shadow-md hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 text-body-md"
+                  >
+                    {nameSaving ? (
+                      <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</>
+                    ) : (
+                      <><Save className="w-4 h-4" /> Save Name</>
+                    )}
+                  </button>
+                </div>
+
+                {/* Divider */}
+                <hr className="border-outline-variant" />
+
+                {/* Reset Password */}
+                <div>
+                  <label className="text-label-lg font-bold text-on-surface flex items-center gap-2 mb-2">
+                    <Lock className="w-4 h-4 text-secondary" />
+                    Reset Password
+                  </label>
+                  <div className="flex flex-col gap-3">
+                    <input
+                      type="password"
+                      value={currentPassword}
+                      onChange={e => setCurrentPassword(e.target.value)}
+                      placeholder="Current Password"
+                      className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant text-body-md text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                    />
+                    <input
+                      type="password"
+                      value={newPassword}
+                      onChange={e => setNewPassword(e.target.value)}
+                      placeholder="New Password"
+                      className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant text-body-md text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                    />
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={e => setConfirmPassword(e.target.value)}
+                      placeholder="Confirm New Password"
+                      className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant text-body-md text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                    />
+                  </div>
+                  {pwMsg && (
+                    <p className={`text-label-sm mt-1 ${pwMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                      {pwMsg.text}
+                    </p>
+                  )}
+                  <button
+                    onClick={handlePasswordSave}
+                    disabled={pwSaving}
+                    className="mt-3 flex items-center justify-center gap-2 bg-primary text-on-primary font-bold py-2.5 px-5 rounded-xl shadow-md hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 text-body-md"
+                  >
+                    {pwSaving ? (
+                      <><Loader2 className="w-4 h-4 animate-spin" /> Updating...</>
+                    ) : (
+                      <><Lock className="w-4 h-4" /> Update Password</>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Mess Details Setup */}
         <div className="flex flex-col gap-2">
-          <div className="bg-surface rounded-2xl shadow-sm border border-outline-variant overflow-hidden">
+          <div className="bg-surface rounded-2xl shadow-sm border border-outline-variant">
             
             {/* Toggle Button */}
             <button 
@@ -194,26 +390,20 @@ const AdminProfile = () => {
                     {/* Divider */}
                     <hr className="border-outline-variant" />
 
-                    {/* Today's Special */}
+                    {/* Mess Name */}
                     <div>
                       <label className="text-label-lg font-bold text-on-surface flex items-center gap-2 mb-2">
-                        <Sparkles className="w-4 h-4 text-warning" />
-                        Today's Special
+                        <Store className="w-4 h-4 text-primary" />
+                        Mess Name
                       </label>
                       <input
                         type="text"
-                        value={messData.todaysSpecial}
-                        onChange={e => updateField('todaysSpecial', e.target.value)}
-                        placeholder="e.g. Dal Rice, Paneer Thali..."
+                        value={messData.name}
+                        onChange={e => updateField('name', e.target.value)}
+                        placeholder="Enter mess name"
                         className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant text-body-md text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
                       />
-                      <p className="text-label-sm text-on-surface-variant mt-1">
-                        Leave empty to auto-detect from your lunch menu.
-                      </p>
                     </div>
-
-                    {/* Divider */}
-                    <hr className="border-outline-variant" />
 
                     {/* Location */}
                     <div>
@@ -248,6 +438,27 @@ const AdminProfile = () => {
                     {/* Divider */}
                     <hr className="border-outline-variant" />
 
+                    {/* Today's Special */}
+                    <div>
+                      <label className="text-label-lg font-bold text-on-surface flex items-center gap-2 mb-2">
+                        <Sparkles className="w-4 h-4 text-warning" />
+                        Today's Special
+                      </label>
+                      <input
+                        type="text"
+                        value={messData.todaysSpecial}
+                        onChange={e => updateField('todaysSpecial', e.target.value)}
+                        placeholder="e.g. Dal Rice, Paneer Thali..."
+                        className="w-full px-4 py-3 bg-surface-container rounded-xl border border-outline-variant text-body-md text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                      />
+                      <p className="text-label-sm text-on-surface-variant mt-1">
+                        Leave empty to auto-detect from your lunch menu.
+                      </p>
+                    </div>
+
+                    {/* Divider */}
+                    <hr className="border-outline-variant" />
+
                     {/* Operating Hours */}
                     <div>
                       <label className="text-label-lg font-bold text-on-surface flex items-center gap-2 mb-3">
@@ -261,7 +472,7 @@ const AdminProfile = () => {
                             type="text"
                             value={messData.hoursBreakfast}
                             onChange={e => updateField('hoursBreakfast', e.target.value)}
-                            placeholder="e.g. 7:00 AM - 10:00 AM"
+                            placeholder="8:00 AM - 10:00 AM"
                             className="w-full px-4 py-2.5 bg-surface-container rounded-xl border border-outline-variant text-body-md text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
                           />
                         </div>
@@ -271,7 +482,7 @@ const AdminProfile = () => {
                             type="text"
                             value={messData.hoursLunch}
                             onChange={e => updateField('hoursLunch', e.target.value)}
-                            placeholder="e.g. 12:00 PM - 3:00 PM"
+                            placeholder="12:30 PM - 2:30 PM"
                             className="w-full px-4 py-2.5 bg-surface-container rounded-xl border border-outline-variant text-body-md text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
                           />
                         </div>
@@ -281,18 +492,47 @@ const AdminProfile = () => {
                             type="text"
                             value={messData.hoursDinner}
                             onChange={e => updateField('hoursDinner', e.target.value)}
-                            placeholder="e.g. 7:00 PM - 10:00 PM"
+                            placeholder="7:30 PM - 9:30 PM"
                             className="w-full px-4 py-2.5 bg-surface-container rounded-xl border border-outline-variant text-body-md text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
                           />
                         </div>
                       </div>
                     </div>
 
-                    {/* Save Button */}
+                    {/* Inline message for mess details */}
+                    {messDetailsMsg && (
+                      <p className={`text-label-sm ${messDetailsMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                        {messDetailsMsg.text}
+                      </p>
+                    )}
+
+                    {/* Save Mess Details Button */}
+                    <button
+                      onClick={handleMessDetailsSave}
+                      disabled={messDetailsSaving}
+                      className="w-full flex items-center justify-center gap-2 bg-primary text-on-primary font-bold py-3 rounded-xl shadow-md hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
+                    >
+                      {messDetailsSaving ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-5 h-5" />
+                          Save Mess Details
+                        </>
+                      )}
+                    </button>
+
+                    {/* Divider before existing thumbnail save */}
+                    <hr className="border-outline-variant" />
+
+                    {/* Original Save (thumbnail + COALESCE update) */}
                     <button
                       onClick={handleSave}
                       disabled={saving}
-                      className="w-full flex items-center justify-center gap-2 bg-primary text-on-primary font-bold py-3 rounded-xl shadow-md hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
+                      className="w-full py-4 rounded-pill font-bold text-white bg-primary hover:opacity-90 transition-all flex items-center justify-center gap-2 text-body-md shadow-card"
                     >
                       {saving ? (
                         <>
@@ -301,8 +541,8 @@ const AdminProfile = () => {
                         </>
                       ) : (
                         <>
-                          <Save className="w-5 h-5" />
-                          Save Changes
+                          <Image className="w-5 h-5" />
+                          Save Thumbnail & Display Settings
                         </>
                       )}
                     </button>
@@ -311,17 +551,18 @@ const AdminProfile = () => {
               </div>
             )}
 
-            {/* Logout Button */}
-            <button 
-              onClick={handleLogout}
-              className="w-full flex items-center justify-between p-4 hover:bg-error/10 transition-colors text-left"
-            >
-              <div className="flex items-center gap-4">
-                <LogOut className="w-5 h-5 text-error" />
-                <span className="text-body-md text-error font-bold">Logout</span>
-              </div>
-            </button>
           </div>
+        </div>
+
+        {/* Logout */}
+        <div className="bg-surface rounded-2xl shadow-sm border border-outline-variant overflow-hidden">
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-4 p-4 hover:bg-error/10 transition-colors text-left"
+          >
+            <LogOut className="w-5 h-5 text-error" />
+            <span className="text-body-md text-error font-bold">Logout</span>
+          </button>
         </div>
 
       </main>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { adminService } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 import { BottomNav } from '../../components/shared/BottomNav';
 import { Plus, Edit2, Trash2, X } from 'lucide-react';
 import ThemeToggle from '../../components/shared/ThemeToggle';
@@ -8,6 +9,7 @@ import { Toast } from '../../components/shared/Toast';
 const EMPTY_ITEM = { name: '', price: '', mealType: 'lunch', foodType: 'veg' };
 
 const MenuManagement = () => {
+  const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [activeTab, setActiveTab] = useState('lunch');
   const [loading, setLoading] = useState(true);
@@ -43,7 +45,7 @@ const MenuManagement = () => {
     setSaving(true);
     try {
       if (modal.mode === 'add') {
-        const autoId = `${req_messId()}-${form.mealType.charAt(0)}${Date.now()}`;
+        const autoId = `${user?.mess_id || user?.messId || 'm'}-${form.mealType.charAt(0)}${Date.now()}`;
         await adminService.addMenuItem({
           id: autoId,
           name: form.name, price: Number(form.price),
@@ -62,8 +64,6 @@ const MenuManagement = () => {
     setSaving(false);
   };
 
-  // helper to generate a unique menu item id
-  function req_messId() { return 'm1'; }
 
 
   const handleDelete = (id) => {
@@ -209,7 +209,7 @@ const MenuManagement = () => {
             <p className="text-body-md text-on-surface-variant">Are you sure you want to delete this menu item? This action cannot be undone.</p>
             <div className="flex gap-3 mt-2">
               <button onClick={() => setDeleteConfirm(null)} className="flex-1 py-3 rounded-pill font-bold border border-outline-variant text-on-surface hover:bg-surface-container transition-colors">Cancel</button>
-              <button onClick={confirmDelete} className="flex-1 py-3 rounded-pill font-bold bg-error text-white hover:bg-error/90 transition-colors">Delete</button>
+              <button onClick={confirmDelete} className="flex-1 py-3 rounded-pill font-bold bg-red-500 text-white hover:bg-red-600 transition-colors">Delete</button>
             </div>
           </div>
         </div>

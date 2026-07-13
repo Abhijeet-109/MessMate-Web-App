@@ -74,11 +74,11 @@ export const BottomNav = ({ variant = 'student' }) => {
                     onClick={() => handleMoreItemClick(item)}
                     className={clsx(
                       "flex flex-col items-center justify-center py-3 rounded-xl gap-1.5 transition-colors",
-                      isActive ? "bg-primary-container" : "hover:bg-surface-container"
+                      isActive ? "bg-primary" : "hover:bg-surface-container"
                     )}
                   >
-                    <Icon className={clsx("w-5 h-5", isActive ? "text-primary-dark" : "text-outline")} strokeWidth={isActive ? 2.5 : 2} />
-                    <span className={clsx("text-[11px] font-semibold", isActive ? "text-primary-dark" : "text-outline")}>{item.label}</span>
+                    <Icon className={clsx("w-5 h-5", isActive ? "text-white" : "text-outline")} strokeWidth={isActive ? 2.5 : 2} />
+                    <span className={clsx("text-[11px] font-semibold", isActive ? "text-white" : "text-outline")}>{item.label}</span>
                   </button>
                 );
               })}
@@ -106,13 +106,13 @@ export const BottomNav = ({ variant = 'student' }) => {
               onClick={() => handleNavClick(item)}
               className="flex flex-col items-center justify-center w-16 h-full gap-1"
             >
-              <div className={clsx("p-1 rounded-full transition-colors", isActive ? "bg-primary-container" : "")}>
+              <div className={clsx("p-1 rounded-full transition-colors", isActive ? "bg-primary" : "")}>
                 <Icon 
-                  className={clsx("w-6 h-6", isActive ? "text-primary-dark" : "text-outline")} 
+                  className={clsx("w-6 h-6", isActive ? "text-white" : "text-outline")} 
                   strokeWidth={isActive ? 2.5 : 2}
                 />
               </div>
-              <span className={clsx("text-[10px] font-semibold", isActive ? "text-primary-dark" : "text-outline")}>
+              <span className={clsx("text-[10px] font-semibold", isActive ? "text-primary" : "text-outline")}>
                 {item.label}
               </span>
             </button>

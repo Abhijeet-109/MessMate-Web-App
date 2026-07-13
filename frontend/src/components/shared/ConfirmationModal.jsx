@@ -27,7 +27,7 @@ export const ConfirmationModal = ({ isOpen, title, message, icon: Icon, confirmT
             onClick={onConfirm}
             className={clsx(
               "flex-1 py-3 rounded-pill text-white font-bold transition-transform active:scale-95",
-              isDestructive ? "bg-error" : "bg-primary"
+              isDestructive ? "bg-red-500 hover:bg-red-600" : "bg-primary"
             )}
           >
             {confirmText}

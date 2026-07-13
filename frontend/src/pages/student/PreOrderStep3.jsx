@@ -13,6 +13,8 @@ const PreOrderStep3 = () => {
   const [paymentMethod, setPaymentMethod] = useState('UPI');
   const [showSuccess, setShowSuccess] = useState(false);
   const [loadingText, setLoadingText] = useState('');
+  const [blockedModal, setBlockedModal] = useState(false);
+  const [blockedMessage, setBlockedMessage] = useState('');
 
   useEffect(() => {
     if (!currentOrder) {
@@ -159,7 +161,17 @@ const PreOrderStep3 = () => {
         navigate('/student/order/confirmed');
       }, 1500);
     } catch (err) {
-      setError(err?.message || 'Order failed. Please try again.');
+      const errMsg = err?.response?.data?.message
+        || err?.response?.data?.error
+        || err?.message
+        || 'Failed to place order. Please try again.';
+
+      if (err?.response?.status === 403 || err?.status === 403) {
+        setBlockedMessage(errMsg);
+        setBlockedModal(true);
+      } else {
+        setError(errMsg);
+      }
       setLoading(false);
       setLoadingText('');
     }
@@ -191,95 +203,140 @@ const PreOrderStep3 = () => {
         </div>
       )}
 
-      <main className="flex-1 overflow-y-auto px-6 py-8 flex flex-col gap-6">
-        
-        {/* Order Summary */}
-        <div className="bg-surface p-5 rounded-xl shadow-card border border-outline-variant">
-          <h3 className="text-label-md text-on-surface-variant uppercase tracking-wider font-bold mb-3">Order Summary</h3>
-          {currentOrder.items.map((item, i) => (
-            <div key={i} className="flex justify-between py-1.5 text-body-md">
-              <span className="text-on-surface">{item.quantity}x {item.name}</span>
-              <span className="font-bold text-on-surface">₹{item.price * item.quantity}</span>
+      {/* Postpaid Blocked Modal */}
+      {blockedModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 animate-fade-in">
+          <div className="bg-surface rounded-2xl p-8 mx-6 max-w-sm w-full flex flex-col items-center gap-4 shadow-xl">
+            <div className="w-16 h-16 rounded-full bg-error/10 flex items-center justify-center">
+              <span className="text-3xl">🚫</span>
             </div>
-          ))}
-          <div className="flex justify-between pt-3 mt-3 border-t border-outline-variant">
-            <span className="font-bold text-on-surface">Total</span>
-            <span className="text-headline-md font-extrabold text-primary-dark">₹{currentOrder.total}</span>
-          </div>
-        </div>
-
-        {/* Payment Options */}
-        <div className="bg-surface p-5 rounded-xl shadow-card border border-outline-variant flex flex-col gap-3">
-          
-          {isSubscription ? (
-            <div className="bg-success/10 text-success px-4 py-4 rounded-xl flex items-center gap-3 border border-success/30">
-              <CheckCircle2 className="w-6 h-6 shrink-0" />
-              <div>
-                <span className="font-bold block">Covered by Subscription</span>
-                <span className="text-[12px] opacity-75">1 meal will be deducted from your plan</span>
-              </div>
-            </div>
-          ) : (
-            <>
-              <h3 className="text-label-md text-on-surface-variant uppercase tracking-wider font-bold mb-1">Select Payment Method</h3>
-              
-              {/* UPI / Online */}
-              <button 
-                onClick={() => setPaymentMethod('UPI')}
-                className={`w-full flex items-center gap-4 p-4 rounded-xl border-2 transition-all ${
-                  paymentMethod === 'UPI' ? 'border-primary bg-primary-container/20' : 'border-outline-variant bg-surface'
-                }`}
-              >
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${paymentMethod === 'UPI' ? 'bg-primary/20' : 'bg-surface-container'}`}>
-                  <CreditCard className={`w-5 h-5 ${paymentMethod === 'UPI' ? 'text-primary' : 'text-on-surface-variant'}`} />
-                </div>
-                <div className="flex-1 text-left">
-                  <span className="font-bold text-on-surface block">UPI / Online Payment</span>
-                  <span className="text-[12px] text-on-surface-variant flex items-center gap-1">
-                    <ShieldCheck className="w-3 h-3" /> Secure payment via Razorpay
-                  </span>
-                </div>
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${paymentMethod === 'UPI' ? 'border-primary' : 'border-outline-variant'}`}>
-                  {paymentMethod === 'UPI' && <div className="w-2.5 h-2.5 rounded-full bg-primary"></div>}
-                </div>
-              </button>
-
-              {/* Pay on Site */}
-              <button 
-                onClick={() => setPaymentMethod('Pay on Site')}
-                className={`w-full flex items-center gap-4 p-4 rounded-xl border-2 transition-all ${
-                  paymentMethod === 'Pay on Site' ? 'border-primary bg-primary-container/20' : 'border-outline-variant bg-surface'
-                }`}
-              >
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${paymentMethod === 'Pay on Site' ? 'bg-primary/20' : 'bg-surface-container'}`}>
-                  <Banknote className={`w-5 h-5 ${paymentMethod === 'Pay on Site' ? 'text-primary' : 'text-on-surface-variant'}`} />
-                </div>
-                <div className="flex-1 text-left">
-                  <span className="font-bold text-on-surface block">Pay on Site</span>
-                  <span className="text-[12px] text-on-surface-variant">Cash/UPI at counter — Postpaid</span>
-                </div>
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${paymentMethod === 'Pay on Site' ? 'border-primary' : 'border-outline-variant'}`}>
-                  {paymentMethod === 'Pay on Site' && <div className="w-2.5 h-2.5 rounded-full bg-primary"></div>}
-                </div>
-              </button>
-            </>
-          )}
-        </div>
-
-        {loading && (
-          <div className="flex flex-col items-center justify-center mt-4 gap-4 animate-fade-in">
-            <div className="w-12 h-12 rounded-full border-4 border-primary border-t-transparent animate-spin"></div>
-            <p className="text-body-md text-on-surface-variant font-bold animate-pulse">
-              {loadingText || 'Processing...'}
+            <h2 className="text-headline-md font-extrabold text-on-surface text-center">
+              Postpaid Blocked
+            </h2>
+            <p className="text-body-md text-on-surface-variant text-center">
+              {blockedMessage}
             </p>
+            <p className="text-label-sm text-on-surface-variant text-center">
+              You can still pay via UPI / Online Payment.
+            </p>
+            <div className="flex gap-3 w-full mt-2">
+              <button
+                onClick={() => { setBlockedModal(false); setPaymentMethod('UPI'); }}
+                className="flex-1 bg-primary text-white font-bold py-3 rounded-xl hover:opacity-90 transition-all"
+              >
+                Switch to UPI
+              </button>
+              <button
+                onClick={() => { setBlockedModal(false); navigate(-1); }}
+                className="flex-1 border-2 border-outline-variant text-on-surface font-bold py-3 rounded-xl hover:bg-surface-container transition-all"
+              >
+                Go Back
+              </button>
+            </div>
           </div>
-        )}
+        </div>
+      )}
 
+      <main className="flex-1 overflow-y-auto py-6">
+        <div className="max-w-2xl mx-auto px-6 w-full flex flex-col gap-6">
+
+          {/* Order Summary */}
+          <div className="bg-surface p-5 rounded-xl shadow-card border border-outline-variant">
+            <h3 className="text-label-md text-on-surface-variant uppercase tracking-wider font-bold mb-3">Order Summary</h3>
+            {currentOrder.items.map((item, i) => (
+              <div key={i} className="flex justify-between py-1.5 text-body-md">
+                <span className="text-on-surface">{item.quantity}x {item.name}</span>
+                <span className="font-bold text-on-surface">₹{item.price * item.quantity}</span>
+              </div>
+            ))}
+            <div className="flex justify-between pt-3 mt-3 border-t border-outline-variant">
+              <span className="font-bold text-on-surface">Total</span>
+              <span className="text-headline-md font-extrabold text-primary-dark">₹{currentOrder.total}</span>
+            </div>
+          </div>
+
+          {/* Payment Options */}
+          <div className="bg-surface p-5 rounded-xl shadow-card border border-outline-variant flex flex-col gap-3">
+
+            {isSubscription ? (
+              <div className="bg-success/10 text-success px-4 py-4 rounded-xl flex items-center gap-3 border border-success/30">
+                <CheckCircle2 className="w-6 h-6 shrink-0" />
+                <div>
+                  <span className="font-bold block">Covered by Subscription</span>
+                  <span className="text-[12px] opacity-75">1 meal will be deducted from your plan</span>
+                </div>
+              </div>
+            ) : (
+              <>
+                <h3 className="text-label-md text-on-surface-variant uppercase tracking-wider font-bold mb-1">Select Payment Method</h3>
+
+                {/* UPI / Online */}
+                <button
+                  onClick={() => setPaymentMethod('UPI')}
+                  className={`w-full flex items-center gap-4 p-4 rounded-xl border-2 transition-all ${paymentMethod === 'UPI' ? 'border-primary bg-primary-container/20' : 'border-outline-variant bg-surface'
+                    }`}
+                >
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${paymentMethod === 'UPI' ? 'bg-primary/20' : 'bg-surface-container'}`}>
+                    <CreditCard className={`w-5 h-5 ${paymentMethod === 'UPI' ? 'text-primary' : 'text-on-surface-variant'}`} />
+                  </div>
+                  <div className="flex-1 text-left">
+                    <span className="font-bold text-on-surface block">UPI / Online Payment</span>
+                    <span className="text-[12px] text-on-surface-variant flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3" /> Secure payment via Razorpay
+                    </span>
+                  </div>
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${paymentMethod === 'UPI' ? 'border-primary' : 'border-outline-variant'}`}>
+                    {paymentMethod === 'UPI' && <div className="w-2.5 h-2.5 rounded-full bg-primary"></div>}
+                  </div>
+                </button>
+
+                {/* Pay on Site */}
+                <button
+                  onClick={() => setPaymentMethod('Pay on Site')}
+                  className={`w-full flex items-center gap-4 p-4 rounded-xl border-2 transition-all ${paymentMethod === 'Pay on Site' ? 'border-primary bg-primary-container/20' : 'border-outline-variant bg-surface'
+                    }`}
+                >
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${paymentMethod === 'Pay on Site' ? 'bg-primary/20' : 'bg-surface-container'}`}>
+                    <Banknote className={`w-5 h-5 ${paymentMethod === 'Pay on Site' ? 'text-primary' : 'text-on-surface-variant'}`} />
+                  </div>
+                  <div className="flex-1 text-left">
+                    <span className="font-bold text-on-surface block">Pay on Site</span>
+                    <span className="text-[12px] text-on-surface-variant">Cash/UPI at counter — Postpaid</span>
+                  </div>
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${paymentMethod === 'Pay on Site' ? 'border-primary' : 'border-outline-variant'}`}>
+                    {paymentMethod === 'Pay on Site' && <div className="w-2.5 h-2.5 rounded-full bg-primary"></div>}
+                  </div>
+                </button>
+              </>
+            )}
+          </div>
+
+          {loading && (
+            <div className="flex flex-col items-center justify-center mt-4 gap-4 animate-fade-in">
+              <div className="w-12 h-12 rounded-full border-4 border-primary border-t-transparent animate-spin"></div>
+              <p className="text-body-md text-on-surface-variant font-bold animate-pulse">
+                {loadingText || 'Processing...'}
+              </p>
+            </div>
+          )}
+
+          {!loading && !showSuccess && (
+            <div className="hidden md:block mt-2">
+              <button
+                onClick={() => handlePlaceOrder(isSubscription ? 'Subscription' : paymentMethod)}
+                className="w-full bg-primary text-white py-4 rounded-pill font-bold text-lg shadow-card hover:bg-primary-dark transition-transform active:scale-[0.98]"
+              >
+                {isSubscription ? 'Confirm Order' : paymentMethod === 'Pay on Site' ? `Place Order — ₹${currentOrder.total} (Pay Later)` : `Pay ₹${currentOrder.total} via Razorpay`}
+              </button>
+            </div>
+          )}
+
+        </div>
       </main>
 
       {!loading && !showSuccess && (
-        <div className="sticky bottom-0 p-4 bg-surface border-t border-outline-variant z-50">
-          <button 
+        <div className="fixed bottom-0 left-0 right-0 max-w-[430px] mx-auto p-4 bg-surface border-t border-outline-variant z-50 md:hidden">
+          <button
             onClick={() => handlePlaceOrder(isSubscription ? 'Subscription' : paymentMethod)}
             className="w-full bg-primary text-white py-4 rounded-pill font-bold text-lg shadow-card hover:bg-primary-dark transition-transform active:scale-[0.98]"
           >

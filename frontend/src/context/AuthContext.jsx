@@ -24,13 +24,21 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('messmate_user', JSON.stringify(userData));
   };
 
+  const updateUser = (updatedFields) => {
+    setUser(prev => {
+      const updated = { ...prev, ...updatedFields };
+      localStorage.setItem('messmate_user', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
   const logout = () => {
     authService.logout();
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, login, logout, updateUser, isLoading }}>
       {children}
     </AuthContext.Provider>
   );

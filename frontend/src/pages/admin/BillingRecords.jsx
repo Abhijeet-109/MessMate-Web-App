@@ -41,22 +41,18 @@ const BillingRecords = () => {
     }
   }, [typeFilter, statusFilter, postpaidView]);
 
-  const handleExport = () => {
-    const url = adminService.exportBillingCSV();
-    const token = localStorage.getItem('messmate_token');
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => res.blob())
-      .then(blob => {
-        const csvBlob = new Blob([blob], { type: 'text/csv' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(csvBlob);
-        a.download = 'billing.csv';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(a.href);
-      })
-      .catch(err => console.error(err));
+  const handleExport = async () => {
+    try {
+      const blob = await adminService.exportBillingCSV();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'billing.csv';
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export failed:', err);
+    }
   };
 
   const handleCollect = async (orderId) => {
@@ -117,7 +113,7 @@ const BillingRecords = () => {
             <div className="w-px bg-outline-variant mx-1"></div>
             {[{ key: '', label: 'All Status' }, { key: 'captured', label: 'Success' }, { key: 'failed', label: 'Failed' }].map(f => (
               <button key={f.key} onClick={() => setStatusFilter(f.key)}
-                className={`px-4 py-1.5 rounded-pill text-label-md font-bold whitespace-nowrap transition-colors ${statusFilter === f.key ? 'bg-secondary text-white' : 'bg-surface-container text-on-surface-variant'}`}>
+                className={`px-4 py-1.5 rounded-pill text-label-md font-bold whitespace-nowrap transition-colors ${statusFilter === f.key ? 'bg-primary text-white' : 'bg-surface-container text-on-surface-variant'}`}>
                 {f.label}
               </button>
             ))}
