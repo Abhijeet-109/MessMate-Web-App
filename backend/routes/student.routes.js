@@ -11,10 +11,13 @@ router.use(roleCheck('student'));
 // Profile
 router.get('/profile', studentController.getProfile);
 router.put('/profile', studentController.updateProfile);
+router.put('/profile/name', studentController.updateName);
+router.put('/profile/password', studentController.resetPassword);
 
 // Orders
 router.get('/orders', studentController.getOrders);
 router.get('/orders/active', studentController.getActiveOrders);
+router.get('/orders/by-date', studentController.getOrdersByDate);
 router.get('/orders/:id', studentController.getOrderById);
 router.post('/orders', studentController.placeOrder);
 

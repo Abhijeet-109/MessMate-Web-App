@@ -8,13 +8,10 @@ const errorHandler = (err, req, res, next) => {
     console.error(err.stack);
   }
 
-  const statusCode = err.statusCode || 500;
-  const message = err.message || 'Internal server error';
+  const status = err.statusCode || 500;
+  const isProd = process.env.NODE_ENV === 'production';
 
-  res.status(statusCode).json({
-    error: message,
-    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
-  });
+  res.status(status).json({ error: isProd ? 'An internal error occurred.' : err.message });
 };
 
 module.exports = errorHandler;

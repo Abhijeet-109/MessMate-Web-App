@@ -1,5 +1,6 @@
-const db = require('../config/db');
+const { query, getClient } = require('../config/db');
 const { formatDate, daysRemaining } = require('../utils/helpers');
+const bcrypt = require('bcryptjs');
 
 // ============================================================
 // DASHBOARD
@@ -8,56 +9,59 @@ const { formatDate, daysRemaining } = require('../utils/helpers');
 /**
  * GET /api/admin/dashboard
  */
-exports.getDashboard = (req, res) => {
+exports.getDashboard = async (req, res) => {
   try {
     const messId = req.user.mess_id;
     const period = req.query.period || 'month';
 
     let dateFilter;
     if (period === 'today') {
-      dateFilter = `date(created_at) = date('now')`;
+      dateFilter = `created_at::date = CURRENT_DATE`;
     } else if (period === 'week') {
-      dateFilter = `date(created_at) >= date('now', '-7 days')`;
+      dateFilter = `created_at::date >= CURRENT_DATE - INTERVAL '7 days'`;
     } else {
-      dateFilter = `date(created_at) >= date('now', 'start of month')`;
+      dateFilter = `created_at::date >= DATE_TRUNC('month', CURRENT_DATE)`;
     }
 
-    const revenue = db.prepare(`
+    const { rows: revenueRows } = await query(`
       SELECT COALESCE(SUM(total), 0) as total, COUNT(*) as count
-      FROM orders WHERE mess_id = ? AND ${dateFilter} AND status NOT IN ('Cancelled','No-show')
-    `).get(messId);
+      FROM orders WHERE mess_id = $1 AND ${dateFilter} AND status NOT IN ('Cancelled','No-show')
+    `, [messId]);
+    const revenue = revenueRows[0];
 
-    const activeSubs = db.prepare(`
-      SELECT COUNT(*) as count FROM subscriptions WHERE mess_id = ? AND status = 'active'
-    `).get(messId);
+    const { rows: activeSubRows } = await query(`
+      SELECT COUNT(*) as count FROM subscriptions WHERE mess_id = $1 AND status = 'active'
+    `, [messId]);
+    const activeSubs = activeSubRows[0];
 
-    const avgRating = db.prepare('SELECT rating, reviews_count FROM messes WHERE id = ?').get(messId);
+    const { rows: ratingRows } = await query('SELECT rating, reviews_count FROM messes WHERE id = $1', [messId]);
+    const avgRating = ratingRows[0];
 
-    const topDishes = db.prepare(`
+    const { rows: topDishes } = await query(`
       SELECT oi.name, SUM(oi.quantity) as total_ordered
       FROM order_items oi
       JOIN orders o ON o.id = oi.order_id
-      WHERE o.mess_id = ? AND ${dateFilter}
+      WHERE o.mess_id = $1 AND ${dateFilter}
       GROUP BY oi.name ORDER BY total_ordered DESC LIMIT 5
-    `).all(messId);
+    `, [messId]);
 
-    const mealTypeStats = db.prepare(`
+    const { rows: mealTypeStats } = await query(`
       SELECT meal_type, COUNT(*) as count
-      FROM orders WHERE mess_id = ? AND ${dateFilter}
+      FROM orders WHERE mess_id = $1 AND ${dateFilter}
       GROUP BY meal_type
-    `).all(messId);
+    `, [messId]);
 
-    const revenueTrend = db.prepare(`
-      SELECT date(created_at) as date, COALESCE(SUM(total), 0) as revenue
+    const { rows: revenueTrend } = await query(`
+      SELECT created_at::date as date, COALESCE(SUM(total), 0) as revenue
       FROM orders
-      WHERE mess_id = ? AND date(created_at) >= date('now', '-30 days') AND status NOT IN ('Cancelled','No-show')
-      GROUP BY date(created_at) ORDER BY date ASC
-    `).all(messId);
+      WHERE mess_id = $1 AND created_at::date >= CURRENT_DATE - INTERVAL '30 days' AND status NOT IN ('Cancelled','No-show')
+      GROUP BY created_at::date ORDER BY date ASC
+    `, [messId]);
 
     res.json({
-      revenue: revenue.total,
-      orderCount: revenue.count,
-      activeSubscribers: activeSubs.count,
+      revenue: Number(revenue.total),
+      orderCount: Number(revenue.count),
+      activeSubscribers: Number(activeSubs.count),
       avgRating: avgRating?.rating || 0,
       reviewsCount: avgRating?.reviews_count || 0,
       topDishes,
@@ -78,30 +82,30 @@ exports.getDashboard = (req, res) => {
 /**
  * GET /api/admin/orders?status=Preparing
  */
-exports.getOrders = (req, res) => {
+exports.getOrders = async (req, res) => {
   try {
     const messId = req.user.mess_id;
     const { status } = req.query;
 
-    let query = `
+    let sql = `
       SELECT o.*, u.name as student_name, u.email as student_email
       FROM orders o
       JOIN users u ON u.id = o.user_id
-      WHERE o.mess_id = ?
+      WHERE o.mess_id = $1
     `;
     const params = [messId];
 
     if (status) {
-      query += ' AND o.status = ?';
+      sql += ` AND o.status = $${params.length + 1}`;
       params.push(status);
     }
 
-    query += ' ORDER BY o.created_at DESC';
+    sql += ' ORDER BY o.created_at DESC';
 
-    const orders = db.prepare(query).all(...params);
+    const { rows: orders } = await query(sql, params);
 
-    const result = orders.map(order => {
-      const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
+    const result = await Promise.all(orders.map(async order => {
+      const { rows: items } = await query('SELECT * FROM order_items WHERE order_id = $1', [order.id]);
       return {
         id: order.id,
         studentName: order.student_name,
@@ -116,7 +120,7 @@ exports.getOrders = (req, res) => {
         notes: order.notes,
         createdAt: order.created_at
       };
-    });
+    }));
 
     res.json(result);
   } catch (err) {
@@ -128,7 +132,7 @@ exports.getOrders = (req, res) => {
 /**
  * PUT /api/admin/orders/:id/status
  */
-exports.updateOrderStatus = (req, res) => {
+exports.updateOrderStatus = async (req, res) => {
   try {
     const { status } = req.body;
     const orderId = req.params.id;
@@ -138,34 +142,59 @@ exports.updateOrderStatus = (req, res) => {
       return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
     }
 
-    const order = db.prepare('SELECT * FROM orders WHERE id = ? AND mess_id = ?').get(orderId, req.user.mess_id);
+    const { rows: orderRows } = await query(
+      'SELECT * FROM orders WHERE id = $1 AND mess_id = $2',
+      [orderId, req.user.mess_id]
+    );
+    const order = orderRows[0];
     if (!order) return res.status(404).json({ error: 'Order not found.' });
 
-    db.prepare("UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, orderId);
+    await query("UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2", [status, orderId]);
 
     // Handle attendance on Completed or No-show
     if (status === 'Completed' && order.subscription_id) {
-      db.prepare("INSERT INTO attendance (user_id, subscription_id, order_id, date, status) VALUES (?, ?, ?, date('now'), 'attended')")
-        .run(order.user_id, order.subscription_id, orderId);
+      await query(
+        "INSERT INTO attendance (user_id, subscription_id, order_id, date, status) VALUES ($1, $2, $3, CURRENT_DATE, 'attended')",
+        [order.user_id, order.subscription_id, orderId]
+      );
     }
 
-    if (status === 'No-show' && order.subscription_id) {
-      db.prepare("INSERT INTO attendance (user_id, subscription_id, order_id, date, status) VALUES (?, ?, ?, date('now'), 'no-show')")
-        .run(order.user_id, order.subscription_id, orderId);
+    if (status === 'No-show') {
+      // Always insert attendance record for any no-show
+      if (order.subscription_id) {
+        await query(
+          "INSERT INTO attendance (user_id, subscription_id, order_id, date, status) VALUES ($1, $2, $3, CURRENT_DATE, 'no-show')",
+          [order.user_id, order.subscription_id, orderId]
+        );
+      }
 
-      // Increment no-show count + deduct meal
-      const sub = db.prepare('SELECT * FROM subscriptions WHERE id = ?').get(order.subscription_id);
-      if (sub) {
-        db.prepare('UPDATE subscriptions SET no_show_count = no_show_count + 1, meals_remaining = MAX(0, meals_remaining - 1) WHERE id = ?')
-          .run(sub.id);
+      // Penalty logic: only for postpaid (Pay on Site) orders
+      if (order.payment_method === 'Pay on Site') {
+        // Fetch active subscription by user_id and mess_id since postpaid orders have no subscription_id
+        const { rows: subRows } = await query(
+          "SELECT * FROM subscriptions WHERE user_id = $1 AND mess_id = $2 AND status = 'active'",
+          [order.user_id, order.mess_id]
+        );
+        const sub = subRows[0];
+        if (sub) {
+          await query(
+            'UPDATE subscriptions SET no_show_count = no_show_count + 1 WHERE id = $1',
+            [sub.id]
+          );
 
-        if (sub.no_show_count + 1 >= sub.max_no_shows) {
-          db.prepare("UPDATE subscriptions SET status = 'cancelled' WHERE id = ?").run(sub.id);
-          db.prepare("INSERT INTO notifications (user_id, type, message) VALUES (?, 'error', ?)")
-            .run(order.user_id, 'Your subscription has been cancelled due to excessive no-shows.');
-        } else {
-          db.prepare("INSERT INTO notifications (user_id, type, message) VALUES (?, 'error', ?)")
-            .run(order.user_id, `No-show detected for order #${orderId}. 1 meal deducted from your plan.`);
+          const newCount = sub.no_show_count + 1;
+
+          if (newCount >= sub.max_no_shows) {
+            await query(
+              "INSERT INTO notifications (user_id, type, message) VALUES ($1, 'error', $2)",
+              [order.user_id, `Postpaid ordering blocked. You have missed ${newCount} orders. Limit is ${sub.max_no_shows}.`]
+            );
+          } else {
+            await query(
+              "INSERT INTO notifications (user_id, type, message) VALUES ($1, 'warning', $2)",
+              [order.user_id, `No-show recorded (${newCount}/${sub.max_no_shows}). Postpaid blocked at ${sub.max_no_shows} misses.`]
+            );
+          }
         }
       }
     }
@@ -181,8 +210,10 @@ exports.updateOrderStatus = (req, res) => {
 
     if (statusMessages[status]) {
       const notifType = status === 'Cancelled' ? 'error' : 'success';
-      db.prepare('INSERT INTO notifications (user_id, type, message) VALUES (?, ?, ?)')
-        .run(order.user_id, notifType, statusMessages[status]);
+      await query(
+        'INSERT INTO notifications (user_id, type, message) VALUES ($1, $2, $3)',
+        [order.user_id, notifType, statusMessages[status]]
+      );
     }
 
     res.json({ success: true, orderId, status });
@@ -196,17 +227,17 @@ exports.updateOrderStatus = (req, res) => {
 // MENU CRUD
 // ============================================================
 
-exports.getMenu = (req, res) => {
+exports.getMenu = async (req, res) => {
   try {
     const { meal_type } = req.query;
-    let query = 'SELECT * FROM menu_items WHERE mess_id = ?';
+    let sql = 'SELECT * FROM menu_items WHERE mess_id = $1';
     const params = [req.user.mess_id];
     if (meal_type) {
-      query += ' AND meal_type = ?';
+      sql += ` AND meal_type = $${params.length + 1}`;
       params.push(meal_type.toLowerCase());
     }
-    query += ' ORDER BY meal_type, name';
-    const items = db.prepare(query).all(...params);
+    sql += ' ORDER BY meal_type, name';
+    const { rows: items } = await query(sql, params);
     res.json(items.map(i => ({
       id: i.id, name: i.name, price: i.price,
       mealType: i.meal_type, foodType: i.food_type, isAvailable: !!i.is_available
@@ -216,13 +247,15 @@ exports.getMenu = (req, res) => {
   }
 };
 
-exports.addMenuItem = (req, res) => {
+exports.addMenuItem = async (req, res) => {
   try {
     const { id, name, price, mealType, foodType } = req.body;
     if (!id || !name || !price || !mealType) return res.status(400).json({ error: 'Missing fields.' });
 
-    db.prepare('INSERT INTO menu_items (id, mess_id, name, price, meal_type, food_type) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(id, req.user.mess_id, name, price, mealType, foodType || 'veg');
+    await query(
+      'INSERT INTO menu_items (id, mess_id, name, price, meal_type, food_type) VALUES ($1, $2, $3, $4, $5, $6)',
+      [id, req.user.mess_id, name, price, mealType, foodType || 'veg']
+    );
 
     res.status(201).json({ success: true, id });
   } catch (err) {
@@ -230,15 +263,15 @@ exports.addMenuItem = (req, res) => {
   }
 };
 
-exports.updateMenuItem = (req, res) => {
+exports.updateMenuItem = async (req, res) => {
   try {
     const { name, price, foodType, isAvailable } = req.body;
-    db.prepare(`
+    await query(`
       UPDATE menu_items SET
-        name = COALESCE(?, name), price = COALESCE(?, price),
-        food_type = COALESCE(?, food_type), is_available = COALESCE(?, is_available)
-      WHERE id = ? AND mess_id = ?
-    `).run(name, price, foodType, isAvailable !== undefined ? (isAvailable ? 1 : 0) : null, req.params.id, req.user.mess_id);
+        name = COALESCE($1, name), price = COALESCE($2, price),
+        food_type = COALESCE($3, food_type), is_available = COALESCE($4, is_available)
+      WHERE id = $5 AND mess_id = $6
+    `, [name, price, foodType, isAvailable !== undefined ? (isAvailable ? 1 : 0) : null, req.params.id, req.user.mess_id]);
 
     res.json({ success: true });
   } catch (err) {
@@ -246,26 +279,36 @@ exports.updateMenuItem = (req, res) => {
   }
 };
 
-exports.deleteMenuItem = (req, res) => {
+exports.deleteMenuItem = async (req, res) => {
   try {
     const itemId = req.params.id;
     const messId = req.user.mess_id;
 
     // Verify the item belongs to this mess
-    const item = db.prepare('SELECT id FROM menu_items WHERE id = ? AND mess_id = ?').get(itemId, messId);
-    if (!item) return res.status(404).json({ error: 'Menu item not found.' });
+    const { rows: itemRows } = await query(
+      'SELECT id FROM menu_items WHERE id = $1 AND mess_id = $2',
+      [itemId, messId]
+    );
+    if (!itemRows[0]) return res.status(404).json({ error: 'Menu item not found.' });
 
     // Wrap in a transaction: remove FK references first, then delete the item
-    const deleteItem = db.transaction(() => {
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
       // Nullify menu_item_id in reviews (preserves review history without the FK)
-      db.prepare('UPDATE reviews SET menu_item_id = NULL WHERE menu_item_id = ?').run(itemId);
+      await client.query('UPDATE reviews SET menu_item_id = NULL WHERE menu_item_id = $1', [itemId]);
       // Delete order_items rows (name & price are already denormalized on each row)
-      db.prepare('DELETE FROM order_items WHERE menu_item_id = ?').run(itemId);
+      await client.query('DELETE FROM order_items WHERE menu_item_id = $1', [itemId]);
       // Now safe to delete the menu item
-      db.prepare('DELETE FROM menu_items WHERE id = ? AND mess_id = ?').run(itemId, messId);
-    });
+      await client.query('DELETE FROM menu_items WHERE id = $1 AND mess_id = $2', [itemId, messId]);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
 
-    deleteItem();
     res.json({ success: true });
   } catch (err) {
     console.error('deleteMenuItem error:', err);
@@ -273,15 +316,20 @@ exports.deleteMenuItem = (req, res) => {
   }
 };
 
-exports.toggleMenuAvailability = (req, res) => {
+exports.toggleMenuAvailability = async (req, res) => {
   try {
-    const item = db.prepare('SELECT is_available FROM menu_items WHERE id = ? AND mess_id = ?')
-      .get(req.params.id, req.user.mess_id);
+    const { rows: itemRows } = await query(
+      'SELECT is_available FROM menu_items WHERE id = $1 AND mess_id = $2',
+      [req.params.id, req.user.mess_id]
+    );
+    const item = itemRows[0];
     if (!item) return res.status(404).json({ error: 'Menu item not found.' });
 
     const newState = item.is_available ? 0 : 1;
-    db.prepare('UPDATE menu_items SET is_available = ? WHERE id = ? AND mess_id = ?')
-      .run(newState, req.params.id, req.user.mess_id);
+    await query(
+      'UPDATE menu_items SET is_available = $1 WHERE id = $2 AND mess_id = $3',
+      [newState, req.params.id, req.user.mess_id]
+    );
 
     res.json({ success: true, isAvailable: !!newState });
   } catch (err) {
@@ -293,43 +341,53 @@ exports.toggleMenuAvailability = (req, res) => {
 // SLOTS CRUD
 // ============================================================
 
-exports.getSlots = (req, res) => {
+exports.getSlots = async (req, res) => {
   try {
-    const slots = db.prepare('SELECT * FROM slots WHERE mess_id = ? ORDER BY meal_type, time').all(req.user.mess_id);
+    const { rows: slots } = await query(
+      'SELECT * FROM slots WHERE mess_id = $1 ORDER BY meal_type, time',
+      [req.user.mess_id]
+    );
     res.json(slots);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch slots.' });
   }
 };
 
-exports.addSlot = (req, res) => {
+exports.addSlot = async (req, res) => {
   try {
     const { mealType, time, capacity } = req.body;
     if (!mealType || !time || !capacity) return res.status(400).json({ error: 'Missing fields.' });
 
-    const result = db.prepare('INSERT INTO slots (mess_id, meal_type, time, capacity) VALUES (?, ?, ?, ?)')
-      .run(req.user.mess_id, mealType, time, capacity);
+    const { rows } = await query(
+      'INSERT INTO slots (mess_id, meal_type, time, capacity) VALUES ($1, $2, $3, $4) RETURNING id',
+      [req.user.mess_id, mealType, time, capacity]
+    );
 
-    res.status(201).json({ success: true, id: result.lastInsertRowid });
+    res.status(201).json({ success: true, id: rows[0].id });
   } catch (err) {
     res.status(500).json({ error: 'Failed to add slot.' });
   }
 };
 
-exports.updateSlot = (req, res) => {
+exports.updateSlot = async (req, res) => {
   try {
     const { time, capacity } = req.body;
-    db.prepare('UPDATE slots SET time = COALESCE(?, time), capacity = COALESCE(?, capacity) WHERE id = ? AND mess_id = ?')
-      .run(time, capacity, req.params.id, req.user.mess_id);
+    await query(
+      'UPDATE slots SET time = COALESCE($1, time), capacity = COALESCE($2, capacity) WHERE id = $3 AND mess_id = $4',
+      [time, capacity, req.params.id, req.user.mess_id]
+    );
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update slot.' });
   }
 };
 
-exports.deleteSlot = (req, res) => {
+exports.deleteSlot = async (req, res) => {
   try {
-    db.prepare('DELETE FROM slots WHERE id = ? AND mess_id = ?').run(req.params.id, req.user.mess_id);
+    await query(
+      'DELETE FROM slots WHERE id = $1 AND mess_id = $2',
+      [req.params.id, req.user.mess_id]
+    );
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete slot.' });
@@ -340,24 +398,24 @@ exports.deleteSlot = (req, res) => {
 // SUBSCRIBERS
 // ============================================================
 
-exports.getSubscribers = (req, res) => {
+exports.getSubscribers = async (req, res) => {
   try {
     const { status } = req.query;
-    let query = `
+    let sql = `
       SELECT s.*, u.name, u.email, p.name as plan_name
       FROM subscriptions s
       JOIN users u ON u.id = s.user_id
       JOIN plans p ON p.id = s.plan_id
-      WHERE s.mess_id = ?
+      WHERE s.mess_id = $1
     `;
     const params = [req.user.mess_id];
     if (status && ['active','expired','cancelled'].includes(status)) {
-      query += ' AND s.status = ?';
+      sql += ` AND s.status = $${params.length + 1}`;
       params.push(status);
     }
-    query += ' ORDER BY s.created_at DESC';
+    sql += ' ORDER BY s.created_at DESC';
 
-    const subs = db.prepare(query).all(...params);
+    const { rows: subs } = await query(sql, params);
 
     res.json(subs.map(s => {
       const days = daysRemaining(s.expires_at);
@@ -375,25 +433,36 @@ exports.getSubscribers = (req, res) => {
   }
 };
 
-exports.updateSubscriber = (req, res) => {
+exports.updateSubscriber = async (req, res) => {
   try {
     const { action, days } = req.body;
     const subId = req.params.id;
 
-    const sub = db.prepare('SELECT * FROM subscriptions WHERE id = ? AND mess_id = ?').get(subId, req.user.mess_id);
+    const { rows: subRows } = await query(
+      'SELECT * FROM subscriptions WHERE id = $1 AND mess_id = $2',
+      [subId, req.user.mess_id]
+    );
+    const sub = subRows[0];
     if (!sub) return res.status(404).json({ error: 'Subscription not found.' });
 
     if (action === 'extend') {
       const extDays = days || 30;
-      db.prepare(`UPDATE subscriptions SET expires_at = DATE(expires_at, '+${extDays} days'), status = 'active' WHERE id = ?`).run(subId);
-      db.prepare("INSERT INTO notifications (user_id, type, message) VALUES (?, 'success', ?)")
-        .run(sub.user_id, `Your subscription has been extended by ${extDays} days.`);
+      await query(
+        `UPDATE subscriptions SET expires_at = expires_at + INTERVAL '${extDays} days', status = 'active' WHERE id = $1`,
+        [subId]
+      );
+      await query(
+        "INSERT INTO notifications (user_id, type, message) VALUES ($1, 'success', $2)",
+        [sub.user_id, `Your subscription has been extended by ${extDays} days.`]
+      );
     } else if (action === 'cancel') {
-      db.prepare("UPDATE subscriptions SET status = 'cancelled' WHERE id = ?").run(subId);
-      db.prepare("INSERT INTO notifications (user_id, type, message) VALUES (?, 'warning', 'Your subscription has been cancelled by the mess owner.')")
-        .run(sub.user_id);
+      await query("UPDATE subscriptions SET status = 'cancelled' WHERE id = $1", [subId]);
+      await query(
+        "INSERT INTO notifications (user_id, type, message) VALUES ($1, 'warning', 'Your subscription has been cancelled by the mess owner.')",
+        [sub.user_id]
+      );
     } else if (action === 'reset_no_shows') {
-      db.prepare('UPDATE subscriptions SET no_show_count = 0 WHERE id = ?').run(subId);
+      await query('UPDATE subscriptions SET no_show_count = 0 WHERE id = $1', [subId]);
     } else {
       return res.status(400).json({ error: 'Invalid action. Use: extend, cancel, reset_no_shows' });
     }
@@ -408,24 +477,24 @@ exports.updateSubscriber = (req, res) => {
 // BILLING
 // ============================================================
 
-exports.getBilling = (req, res) => {
+exports.getBilling = async (req, res) => {
   try {
     const { type, status } = req.query;
-    let query = `
+    let sql = `
       SELECT p.*, u.name as student_name, o.payment_method
       FROM payments p
       JOIN users u ON u.id = p.user_id
       LEFT JOIN orders o ON o.id = p.order_id
-      WHERE p.user_id IN (SELECT DISTINCT user_id FROM orders WHERE mess_id = ?)
+      WHERE p.user_id IN (SELECT DISTINCT user_id FROM orders WHERE mess_id = $1)
     `;
     const params = [req.user.mess_id];
-    if (type === 'subscription') { query += " AND p.type = 'subscription'"; }
-    else if (type === 'order') { query += " AND p.type = 'order'"; }
-    if (status === 'captured') { query += " AND p.status = 'captured'"; }
-    else if (status === 'failed') { query += " AND p.status = 'failed'"; }
-    query += ' ORDER BY p.created_at DESC';
+    if (type === 'subscription') { sql += ` AND p.type = 'subscription'`; }
+    else if (type === 'order') { sql += ` AND p.type = 'order'`; }
+    if (status === 'captured') { sql += ` AND p.status = 'captured'`; }
+    else if (status === 'failed') { sql += ` AND p.status = 'failed'`; }
+    sql += ' ORDER BY p.created_at DESC';
 
-    const records = db.prepare(query).all(...params);
+    const { rows: records } = await query(sql, params);
     res.json(records.map(r => ({
       id: r.razorpay_payment_id || `TXN-${r.id}`,
       date: r.created_at,
@@ -441,19 +510,19 @@ exports.getBilling = (req, res) => {
   }
 };
 
-exports.exportBillingCSV = (req, res) => {
+exports.exportBillingCSV = async (req, res) => {
   try {
-    const records = db.prepare(`
+    const { rows: records } = await query(`
       SELECT p.*, u.name as student_name
       FROM payments p
       JOIN users u ON u.id = p.user_id
-      WHERE p.user_id IN (SELECT DISTINCT user_id FROM orders WHERE mess_id = ?)
+      WHERE p.user_id IN (SELECT DISTINCT user_id FROM orders WHERE mess_id = $1)
       ORDER BY p.created_at DESC
-    `).all(req.user.mess_id);
+    `, [req.user.mess_id]);
 
     const rows = records.map(r => [
       r.razorpay_payment_id || `TXN-${r.id}`,
-      r.created_at.split('T')[0],
+      r.created_at instanceof Date ? r.created_at.toISOString().split('T')[0] : r.created_at.split('T')[0],
       r.student_name,
       r.type === 'subscription' ? 'Subscription' : 'Daily Meal',
       r.amount,
@@ -473,16 +542,16 @@ exports.exportBillingCSV = (req, res) => {
 // REVIEWS
 // ============================================================
 
-exports.getReviews = (req, res) => {
+exports.getReviews = async (req, res) => {
   try {
-    const reviews = db.prepare(`
+    const { rows: reviews } = await query(`
       SELECT r.*, u.name as student_name, mi.name as dish_name
       FROM reviews r
       JOIN users u ON u.id = r.user_id
       JOIN menu_items mi ON mi.id = r.menu_item_id
-      WHERE r.mess_id = ?
+      WHERE r.mess_id = $1
       ORDER BY r.created_at DESC
-    `).all(req.user.mess_id);
+    `, [req.user.mess_id]);
 
     res.json(reviews.map(r => ({
       id: r.id, studentName: r.student_name, dishName: r.dish_name,
@@ -497,16 +566,22 @@ exports.getReviews = (req, res) => {
 // ATTENDANCE
 // ============================================================
 
-exports.markAttendance = (req, res) => {
+exports.markAttendance = async (req, res) => {
   try {
     const { status } = req.body; // 'attended' or 'no-show'
     const orderId = req.params.orderId;
 
-    const order = db.prepare('SELECT * FROM orders WHERE id = ? AND mess_id = ?').get(orderId, req.user.mess_id);
+    const { rows: orderRows } = await query(
+      'SELECT * FROM orders WHERE id = $1 AND mess_id = $2',
+      [orderId, req.user.mess_id]
+    );
+    const order = orderRows[0];
     if (!order) return res.status(404).json({ error: 'Order not found.' });
 
-    db.prepare("INSERT INTO attendance (user_id, subscription_id, order_id, date, status) VALUES (?, ?, ?, date('now'), ?)")
-      .run(order.user_id, order.subscription_id, orderId, status);
+    await query(
+      "INSERT INTO attendance (user_id, subscription_id, order_id, date, status) VALUES ($1, $2, $3, CURRENT_DATE, $4)",
+      [order.user_id, order.subscription_id, orderId, status]
+    );
 
     res.json({ success: true });
   } catch (err) {
@@ -518,19 +593,19 @@ exports.markAttendance = (req, res) => {
 // STUDENTS (list, profile, activate/deactivate)
 // ============================================================
 
-exports.getStudents = (req, res) => {
+exports.getStudents = async (req, res) => {
   try {
-    const students = db.prepare(`
+    const { rows: students } = await query(`
       SELECT u.id, u.name, u.email, u.phone, u.college, u.is_active,
-        (SELECT COUNT(*) FROM orders WHERE user_id = u.id AND mess_id = ?) as order_count
+        (SELECT COUNT(*) FROM orders WHERE user_id = u.id AND mess_id = $1) as order_count
       FROM users u
       WHERE u.role = 'student' AND u.id IN (
-        SELECT DISTINCT user_id FROM orders WHERE mess_id = ?
+        SELECT DISTINCT user_id FROM orders WHERE mess_id = $2
         UNION
-        SELECT DISTINCT user_id FROM subscriptions WHERE mess_id = ?
+        SELECT DISTINCT user_id FROM subscriptions WHERE mess_id = $3
       )
       ORDER BY u.name
-    `).all(req.user.mess_id, req.user.mess_id, req.user.mess_id);
+    `, [req.user.mess_id, req.user.mess_id, req.user.mess_id]);
 
     res.json(students);
   } catch (err) {
@@ -538,17 +613,25 @@ exports.getStudents = (req, res) => {
   }
 };
 
-exports.getStudentProfile = (req, res) => {
+exports.getStudentProfile = async (req, res) => {
   try {
-    const student = db.prepare('SELECT id, name, email, phone, college, is_active FROM users WHERE id = ? AND role = ?')
-      .get(req.params.id, 'student');
+    const { rows: studentRows } = await query(
+      'SELECT id, name, email, phone, college, is_active FROM users WHERE id = $1 AND role = $2',
+      [req.params.id, 'student']
+    );
+    const student = studentRows[0];
     if (!student) return res.status(404).json({ error: 'Student not found.' });
 
-    const sub = db.prepare("SELECT * FROM subscriptions WHERE user_id = ? AND mess_id = ? AND status = 'active'")
-      .get(student.id, req.user.mess_id);
+    const { rows: subRows } = await query(
+      "SELECT * FROM subscriptions WHERE user_id = $1 AND mess_id = $2 AND status = 'active'",
+      [student.id, req.user.mess_id]
+    );
+    const sub = subRows[0];
 
-    const recentOrders = db.prepare('SELECT id, status, total, created_at FROM orders WHERE user_id = ? AND mess_id = ? ORDER BY created_at DESC LIMIT 10')
-      .all(student.id, req.user.mess_id);
+    const { rows: recentOrders } = await query(
+      'SELECT id, status, total, created_at FROM orders WHERE user_id = $1 AND mess_id = $2 ORDER BY created_at DESC LIMIT 10',
+      [student.id, req.user.mess_id]
+    );
 
     res.json({ ...student, subscription: sub || null, recentOrders });
   } catch (err) {
@@ -556,10 +639,13 @@ exports.getStudentProfile = (req, res) => {
   }
 };
 
-exports.toggleStudentStatus = (req, res) => {
+exports.toggleStudentStatus = async (req, res) => {
   try {
     const { isActive } = req.body;
-    db.prepare('UPDATE users SET is_active = ? WHERE id = ? AND role = ?').run(isActive ? 1 : 0, req.params.id, 'student');
+    await query(
+      'UPDATE users SET is_active = $1 WHERE id = $2 AND role = $3',
+      [isActive ? 1 : 0, req.params.id, 'student']
+    );
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update student status.' });
@@ -570,9 +656,10 @@ exports.toggleStudentStatus = (req, res) => {
 // MESS PROFILE (get + update)
 // ============================================================
 
-exports.getMess = (req, res) => {
+exports.getMess = async (req, res) => {
   try {
-    const mess = db.prepare('SELECT * FROM messes WHERE id = ?').get(req.user.mess_id);
+    const { rows } = await query('SELECT * FROM messes WHERE id = $1', [req.user.mess_id]);
+    const mess = rows[0];
     if (!mess) return res.status(404).json({ error: 'Mess not found.' });
     res.json(mess);
   } catch (err) {
@@ -580,17 +667,17 @@ exports.getMess = (req, res) => {
   }
 };
 
-exports.updateMess = (req, res) => {
+exports.updateMess = async (req, res) => {
   try {
     const { name, location, contact, isOpen, hoursBreakfast, hoursLunch, hoursDinner, thumbnail, todaysSpecial } = req.body;
-    db.prepare(`
+    await query(`
       UPDATE messes SET
-        name = COALESCE(?, name), location = COALESCE(?, location), contact = COALESCE(?, contact),
-        is_open = COALESCE(?, is_open), hours_breakfast = COALESCE(?, hours_breakfast),
-        hours_lunch = COALESCE(?, hours_lunch), hours_dinner = COALESCE(?, hours_dinner),
-        thumbnail = COALESCE(?, thumbnail), todays_special = COALESCE(?, todays_special)
-      WHERE id = ?
-    `).run(name, location, contact, isOpen !== undefined ? (isOpen ? 1 : 0) : null, hoursBreakfast, hoursLunch, hoursDinner, thumbnail, todaysSpecial, req.user.mess_id);
+        name = COALESCE($1, name), location = COALESCE($2, location), contact = COALESCE($3, contact),
+        is_open = COALESCE($4, is_open), hours_breakfast = COALESCE($5, hours_breakfast),
+        hours_lunch = COALESCE($6, hours_lunch), hours_dinner = COALESCE($7, hours_dinner),
+        thumbnail = COALESCE($8, thumbnail), todays_special = COALESCE($9, todays_special)
+      WHERE id = $10
+    `, [name, location, contact, isOpen !== undefined ? (isOpen ? 1 : 0) : null, hoursBreakfast, hoursLunch, hoursDinner, thumbnail, todaysSpecial, req.user.mess_id]);
 
     res.json({ success: true });
   } catch (err) {
@@ -603,12 +690,15 @@ exports.updateMess = (req, res) => {
 // PLANS (full CRUD)
 // ============================================================
 
-exports.getPlans = (req, res) => {
+exports.getPlans = async (req, res) => {
   try {
-    const plans = db.prepare('SELECT * FROM plans WHERE mess_id = ? ORDER BY price ASC').all(req.user.mess_id);
+    const { rows: plans } = await query(
+      'SELECT * FROM plans WHERE mess_id = $1 ORDER BY price ASC',
+      [req.user.mess_id]
+    );
     res.json(plans.map(p => ({
       id: p.id, name: p.name, price: p.price,
-      totalMeals: p.total_meals, mealTypes: JSON.parse(p.meal_types || '[]'),
+      totalMeals: p.total_meals, mealTypes: p.meal_types ? p.meal_types.split(',') : [],
       isRecommended: !!p.is_recommended
     })));
   } catch (err) {
@@ -616,30 +706,36 @@ exports.getPlans = (req, res) => {
   }
 };
 
-exports.addPlan = (req, res) => {
+exports.addPlan = async (req, res) => {
   try {
     const { name, price, totalMeals, mealTypes, isRecommended } = req.body;
     if (!name || !price || !totalMeals) return res.status(400).json({ error: 'Missing fields.' });
     const id = `p${Date.now()}`;
-    db.prepare('INSERT INTO plans (id, mess_id, name, price, total_meals, meal_types, is_recommended) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(id, req.user.mess_id, name, price, totalMeals, JSON.stringify(mealTypes || []), isRecommended ? 1 : 0);
+    await query(
+      'INSERT INTO plans (id, mess_id, name, price, total_meals, meal_types, is_recommended) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [id, req.user.mess_id, name, price, totalMeals, Array.isArray(mealTypes) ? mealTypes.join(',') : (mealTypes || ''), isRecommended ? 1 : 0]
+    );
     res.status(201).json({ success: true, id });
   } catch (err) {
     res.status(500).json({ error: 'Failed to add plan.' });
   }
 };
 
-exports.updatePlan = (req, res) => {
+exports.updatePlan = async (req, res) => {
   try {
     const { name, price, totalMeals, mealTypes, isRecommended } = req.body;
-    const plan = db.prepare('SELECT * FROM plans WHERE id = ? AND mess_id = ?').get(req.params.id, req.user.mess_id);
-    if (!plan) return res.status(404).json({ error: 'Plan not found.' });
+    const { rows: planRows } = await query(
+      'SELECT * FROM plans WHERE id = $1 AND mess_id = $2',
+      [req.params.id, req.user.mess_id]
+    );
+    if (!planRows[0]) return res.status(404).json({ error: 'Plan not found.' });
 
-    db.prepare(`UPDATE plans SET name = COALESCE(?, name), price = COALESCE(?, price), 
-      total_meals = COALESCE(?, total_meals), meal_types = COALESCE(?, meal_types),
-      is_recommended = COALESCE(?, is_recommended) WHERE id = ?`)
-      .run(name, price, totalMeals, mealTypes ? JSON.stringify(mealTypes) : null, 
-        isRecommended !== undefined ? (isRecommended ? 1 : 0) : null, req.params.id);
+    await query(`UPDATE plans SET name = COALESCE($1, name), price = COALESCE($2, price), 
+      total_meals = COALESCE($3, total_meals), meal_types = COALESCE($4, meal_types),
+      is_recommended = COALESCE($5, is_recommended) WHERE id = $6`,
+      [name, price, totalMeals, mealTypes ? mealTypes.join(',') : null,
+        isRecommended !== undefined ? (isRecommended ? 1 : 0) : null, req.params.id]
+    );
 
     res.json({ success: true });
   } catch (err) {
@@ -647,14 +743,18 @@ exports.updatePlan = (req, res) => {
   }
 };
 
-exports.deletePlan = (req, res) => {
+exports.deletePlan = async (req, res) => {
   try {
     // Don't delete if active subscriptions exist
-    const activeSubs = db.prepare("SELECT COUNT(*) as count FROM subscriptions WHERE plan_id = ? AND status = 'active'").get(req.params.id);
-    if (activeSubs.count > 0) {
+    const { rows: activeSubRows } = await query(
+      "SELECT COUNT(*) as count FROM subscriptions WHERE plan_id = $1 AND status = 'active'",
+      [req.params.id]
+    );
+    const activeSubs = activeSubRows[0];
+    if (parseInt(activeSubs.count) > 0) {
       return res.status(400).json({ error: `Cannot delete: ${activeSubs.count} active subscriptions on this plan.` });
     }
-    db.prepare('DELETE FROM plans WHERE id = ? AND mess_id = ?').run(req.params.id, req.user.mess_id);
+    await query('DELETE FROM plans WHERE id = $1 AND mess_id = $2', [req.params.id, req.user.mess_id]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete plan.' });
@@ -668,19 +768,19 @@ exports.deletePlan = (req, res) => {
 /**
  * GET /api/admin/orders/postpaid
  */
-exports.getPostpaidOrders = (req, res) => {
+exports.getPostpaidOrders = async (req, res) => {
   try {
     const messId = req.user.mess_id;
-    const orders = db.prepare(`
+    const { rows: orders } = await query(`
       SELECT o.*, u.name as student_name
       FROM orders o
       JOIN users u ON u.id = o.user_id
-      WHERE o.mess_id = ? AND o.payment_method = 'Pay on Site'
+      WHERE o.mess_id = $1 AND o.payment_method = 'Pay on Site'
       ORDER BY o.created_at DESC
-    `).all(messId);
+    `, [messId]);
 
-    const result = orders.map(order => {
-      const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
+    const result = await Promise.all(orders.map(async order => {
+      const { rows: items } = await query('SELECT * FROM order_items WHERE order_id = $1', [order.id]);
       return {
         id: order.id,
         studentName: order.student_name,
@@ -693,7 +793,7 @@ exports.getPostpaidOrders = (req, res) => {
         paymentCollected: !!order.payment_collected,
         createdAt: order.created_at,
       };
-    });
+    }));
 
     const pending = result.filter(o => !o.paymentCollected && !['Cancelled', 'No-show'].includes(o.status));
     const collected = result.filter(o => o.paymentCollected);
@@ -708,13 +808,16 @@ exports.getPostpaidOrders = (req, res) => {
 /**
  * POST /api/admin/orders/:id/collect-payment
  */
-exports.collectPostpaidPayment = (req, res) => {
+exports.collectPostpaidPayment = async (req, res) => {
   try {
     const orderId = req.params.id;
     const messId = req.user.mess_id;
 
-    const order = db.prepare("SELECT * FROM orders WHERE id = ? AND mess_id = ? AND payment_method = 'Pay on Site'")
-      .get(orderId, messId);
+    const { rows: orderRows } = await query(
+      "SELECT * FROM orders WHERE id = $1 AND mess_id = $2 AND payment_method = 'Pay on Site'",
+      [orderId, messId]
+    );
+    const order = orderRows[0];
 
     if (!order) {
       return res.status(404).json({ error: 'Postpaid order not found.' });
@@ -723,22 +826,113 @@ exports.collectPostpaidPayment = (req, res) => {
       return res.status(400).json({ error: 'Payment already collected.' });
     }
 
-    const collectTx = db.transaction(() => {
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
       // Mark order as collected
-      db.prepare("UPDATE orders SET payment_collected = 1, updated_at = datetime('now') WHERE id = ?").run(orderId);
+      await client.query(
+        "UPDATE orders SET payment_collected = 1, updated_at = NOW() WHERE id = $1",
+        [orderId]
+      );
 
       // Insert payment record
-      db.prepare(`
+      await client.query(`
         INSERT INTO payments (order_id, user_id, mess_id, amount, type, status, remarks, created_at)
-        VALUES (?, ?, ?, ?, 'order', 'captured', 'Postpaid - Cash Collected', datetime('now'))
-      `).run(orderId, order.user_id, messId, order.total);
-    });
+        VALUES ($1, $2, $3, $4, 'order', 'captured', 'Postpaid - Cash Collected', NOW())
+      `, [orderId, order.user_id, messId, order.total]);
 
-    collectTx();
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
 
     res.json({ success: true, message: `₹${order.total} collected for order #${orderId}` });
   } catch (err) {
     console.error('collectPostpaidPayment error:', err);
     res.status(500).json({ error: 'Failed to collect payment.' });
+  }
+};
+
+// ============================================================
+// OWNER PROFILE SETTINGS
+// ============================================================
+
+/**
+ * PUT /api/admin/profile/name
+ */
+exports.updateOwnerName = async (req, res) => {
+  const { name } = req.body;
+  if (!name || name.trim().length < 2) {
+    return res.status(400).json({ message: 'Name must be at least 2 characters.' });
+  }
+  try {
+    await query('UPDATE users SET name = $1 WHERE id = $2', [name.trim(), req.user.id]);
+    res.json({ message: 'Name updated successfully.' });
+  } catch (e) {
+    res.status(500).json({ message: 'Failed to update name.' });
+  }
+};
+
+/**
+ * PUT /api/admin/profile/password
+ */
+exports.resetOwnerPassword = async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ message: 'Both fields are required.' });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ message: 'New password must be at least 6 characters.' });
+  }
+  try {
+    const { rows } = await query('SELECT password FROM users WHERE id = $1', [req.user.id]);
+    const valid = await bcrypt.compare(currentPassword, rows[0].password);
+    if (!valid) return res.status(401).json({ message: 'Current password is incorrect.' });
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await query('UPDATE users SET password = $1 WHERE id = $2', [hashed, req.user.id]);
+    res.json({ message: 'Password updated successfully.' });
+  } catch (e) {
+    res.status(500).json({ message: 'Failed to update password.' });
+  }
+};
+
+/**
+ * PUT /api/admin/mess/details
+ */
+exports.updateMessDetails = async (req, res) => {
+  const { messName, location, contact, hoursBreakfast, hoursLunch, hoursDinner, todaysSpecial } = req.body;
+  if (!messName || messName.trim().length < 2) {
+    return res.status(400).json({ message: 'Mess name must be at least 2 characters.' });
+  }
+  try {
+    const messId = req.user.mess_id;
+    await query(
+      `UPDATE messes SET
+        name = $1,
+        location = $2,
+        contact = $3,
+        hours_breakfast = $4,
+        hours_lunch = $5,
+        hours_dinner = $6,
+        todays_special = $7
+       WHERE id = $8`,
+      [
+        messName.trim(),
+        location || null,
+        contact || null,
+        hoursBreakfast || null,
+        hoursLunch || null,
+        hoursDinner || null,
+        todaysSpecial || null,
+        messId
+      ]
+    );
+    res.json({ message: 'Mess details updated successfully.' });
+  } catch (e) {
+    res.status(500).json({ message: 'Failed to update mess details.' });
   }
 };

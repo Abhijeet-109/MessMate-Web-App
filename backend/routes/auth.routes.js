@@ -11,4 +11,7 @@ router.post('/register-owner', authController.registerOwner);
 // POST /api/auth/login — Login (student or admin)
 router.post('/login', authController.login);
 
+const auth = require('../middleware/auth');
+router.post('/refresh', auth, authController.refreshToken);
+
 module.exports = router;

@@ -1,25 +1,30 @@
-const db = require('../config/db');
+const { query, getClient } = require('../config/db');
 const { generateOrderId, todayDate, daysRemaining, formatDate } = require('../utils/helpers');
+const bcrypt = require('bcryptjs');
 
 /**
  * GET /api/student/profile
  */
-exports.getProfile = (req, res) => {
+exports.getProfile = async (req, res) => {
   try {
-    const user = db.prepare('SELECT id, name, email, phone, college, role, mess_id, is_active FROM users WHERE id = ?')
-      .get(req.user.id);
+    const { rows: userRows } = await query(
+      'SELECT id, name, email, phone, college, role, mess_id, is_active FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const user = userRows[0];
 
     if (!user) return res.status(404).json({ error: 'User not found.' });
 
     // Attach subscription
-    const sub = db.prepare(`
+    const { rows: subRows } = await query(`
       SELECT s.*, m.name as mess_name, p.name as plan_name
       FROM subscriptions s
       JOIN messes m ON m.id = s.mess_id
       JOIN plans p ON p.id = s.plan_id
-      WHERE s.user_id = ? AND s.status = 'active'
+      WHERE s.user_id = $1 AND s.status = 'active'
       ORDER BY s.created_at DESC LIMIT 1
-    `).get(user.id);
+    `, [user.id]);
+    const sub = subRows[0];
 
     if (sub) {
       user.subscription = {
@@ -48,15 +53,20 @@ exports.getProfile = (req, res) => {
 /**
  * PUT /api/student/profile
  */
-exports.updateProfile = (req, res) => {
+exports.updateProfile = async (req, res) => {
   try {
     const { name, phone, college } = req.body;
 
-    db.prepare('UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), college = COALESCE(?, college) WHERE id = ?')
-      .run(name || null, phone || null, college || null, req.user.id);
+    await query(
+      'UPDATE users SET name = COALESCE($1, name), phone = COALESCE($2, phone), college = COALESCE($3, college) WHERE id = $4',
+      [name || null, phone || null, college || null, req.user.id]
+    );
 
-    const user = db.prepare('SELECT id, name, email, phone, college, role FROM users WHERE id = ?').get(req.user.id);
-    res.json(user);
+    const { rows } = await query(
+      'SELECT id, name, email, phone, college, role FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    res.json(rows[0]);
   } catch (err) {
     console.error('updateProfile error:', err);
     res.status(500).json({ error: 'Failed to update profile.' });
@@ -66,18 +76,18 @@ exports.updateProfile = (req, res) => {
 /**
  * GET /api/student/orders
  */
-exports.getOrders = (req, res) => {
+exports.getOrders = async (req, res) => {
   try {
-    const orders = db.prepare(`
+    const { rows: orders } = await query(`
       SELECT o.*, m.name as mess_name
       FROM orders o
       JOIN messes m ON m.id = o.mess_id
-      WHERE o.user_id = ?
+      WHERE o.user_id = $1
       ORDER BY o.created_at DESC
-    `).all(req.user.id);
+    `, [req.user.id]);
 
-    const result = orders.map(order => {
-      const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
+    const result = await Promise.all(orders.map(async order => {
+      const { rows: items } = await query('SELECT * FROM order_items WHERE order_id = $1', [order.id]);
       return {
         id: order.id,
         messId: order.mess_id,
@@ -93,7 +103,7 @@ exports.getOrders = (req, res) => {
         estimatedReadyTime: order.estimated_ready_time,
         notes: order.notes
       };
-    });
+    }));
 
     res.json(result);
   } catch (err) {
@@ -105,16 +115,16 @@ exports.getOrders = (req, res) => {
 /**
  * GET /api/student/orders/active — Lightweight poll endpoint
  */
-exports.getActiveOrders = (req, res) => {
+exports.getActiveOrders = async (req, res) => {
   try {
-    const orders = db.prepare(`
+    const { rows: orders } = await query(`
       SELECT o.id, o.status, o.estimated_ready_time, o.updated_at,
              o.slot_time, o.meal_type, o.total, m.name as mess_name
       FROM orders o
       JOIN messes m ON m.id = o.mess_id
-      WHERE o.user_id = ? AND o.status NOT IN ('Completed', 'Cancelled', 'No-show')
+      WHERE o.user_id = $1 AND o.status NOT IN ('Completed', 'Cancelled', 'No-show')
       ORDER BY o.created_at DESC
-    `).all(req.user.id);
+    `, [req.user.id]);
 
     res.json(orders.map(o => ({
       id: o.id,
@@ -135,18 +145,19 @@ exports.getActiveOrders = (req, res) => {
 /**
  * GET /api/student/orders/:id
  */
-exports.getOrderById = (req, res) => {
+exports.getOrderById = async (req, res) => {
   try {
-    const order = db.prepare(`
+    const { rows: orderRows } = await query(`
       SELECT o.*, m.name as mess_name
       FROM orders o
       JOIN messes m ON m.id = o.mess_id
-      WHERE o.id = ? AND o.user_id = ?
-    `).get(req.params.id, req.user.id);
+      WHERE o.id = $1 AND o.user_id = $2
+    `, [req.params.id, req.user.id]);
+    const order = orderRows[0];
 
     if (!order) return res.status(404).json({ error: 'Order not found.' });
 
-    const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
+    const { rows: items } = await query('SELECT * FROM order_items WHERE order_id = $1', [order.id]);
 
     res.json({
       id: order.id,
@@ -172,7 +183,7 @@ exports.getOrderById = (req, res) => {
 /**
  * POST /api/student/orders — Place a new order
  */
-exports.placeOrder = (req, res) => {
+exports.placeOrder = async (req, res) => {
   try {
     const { messId, mealType, slotTime, orderType, items, paymentMethod, notes, paymentId } = req.body;
 
@@ -191,19 +202,37 @@ exports.placeOrder = (req, res) => {
       return res.status(400).json({ error: 'Online payment required. Please complete payment first.' });
     }
 
+    // Block postpaid ordering if no-show limit exceeded
+    if (paymentMethod === 'Pay on Site') {
+      const { rows: activeSubRows } = await query(
+        "SELECT * FROM subscriptions WHERE user_id = $1 AND mess_id = $2 AND status = 'active'",
+        [req.user.id, messId]
+      );
+      const activeSub = activeSubRows[0];
+      if (activeSub && activeSub.no_show_count >= activeSub.max_no_shows) {
+        return res.status(403).json({
+          message: `Postpaid ordering blocked. You have missed ${activeSub.no_show_count} orders. Limit resets on subscription renewal.`
+        });
+      }
+    }
+
     const orderId = generateOrderId();
     const total = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
     // Wrap entire DB logic in a transaction so partial writes don't persist on crash
-    const placeOrderTx = db.transaction(() => {
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
       let subscriptionId = null;
 
       // If paying via subscription, validate and deduct
       if (paymentMethod === 'Subscription') {
-        const sub = db.prepare(`
+        const { rows: subRows } = await client.query(`
           SELECT * FROM subscriptions
-          WHERE user_id = ? AND mess_id = ? AND status = 'active'
-        `).get(req.user.id, messId);
+          WHERE user_id = $1 AND mess_id = $2 AND status = 'active'
+        `, [req.user.id, messId]);
+        const sub = subRows[0];
 
         if (!sub) {
           throw new Error('No active subscription for this mess.');
@@ -213,45 +242,59 @@ exports.placeOrder = (req, res) => {
         }
 
         // Deduct one meal
-        db.prepare('UPDATE subscriptions SET meals_remaining = meals_remaining - 1 WHERE id = ?').run(sub.id);
+        await client.query('UPDATE subscriptions SET meals_remaining = meals_remaining - 1 WHERE id = $1', [sub.id]);
 
         // Check if now expired
         if (sub.meals_remaining - 1 <= 0) {
-          db.prepare("UPDATE subscriptions SET status = 'expired' WHERE id = ?").run(sub.id);
+          await client.query("UPDATE subscriptions SET status = 'expired' WHERE id = $1", [sub.id]);
         }
 
         subscriptionId = sub.id;
       }
 
       // Insert order
-      db.prepare(`
+      await client.query(`
         INSERT INTO orders (id, user_id, mess_id, subscription_id, meal_type, slot_time, order_type, total, status, payment_method, payment_id, notes, estimated_ready_time)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Placed', ?, ?, ?, ?)
-      `).run(orderId, req.user.id, messId, subscriptionId, mealType, slotTime, orderType, total, paymentMethod, paymentId || null, notes || '', null);
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Placed', $9, $10, $11, $12)
+      `, [orderId, req.user.id, messId, subscriptionId, mealType, slotTime, orderType, total, paymentMethod, paymentId || null, notes || '', null]);
 
       // Insert order items
-      const insertItem = db.prepare('INSERT INTO order_items (order_id, menu_item_id, name, quantity, price) VALUES (?, ?, ?, ?, ?)');
-      items.forEach(item => {
-        insertItem.run(orderId, item.id, item.name, item.quantity, item.price);
-      });
+      for (const item of items) {
+        await client.query(
+          'INSERT INTO order_items (order_id, menu_item_id, name, quantity, price) VALUES ($1, $2, $3, $4, $5)',
+          [orderId, item.id, item.name, item.quantity, item.price]
+        );
+      }
 
       // Increment slot bookings
-      db.prepare('UPDATE slots SET booked = booked + 1 WHERE mess_id = ? AND time = ? AND meal_type = ?')
-        .run(messId, slotTime, mealType.toLowerCase());
+      await client.query(
+        'UPDATE slots SET booked = booked + 1 WHERE mess_id = $1 AND time = $2 AND meal_type = $3',
+        [messId, slotTime, mealType.toLowerCase()]
+      );
 
       // Link Razorpay payment record to this order (so it shows in billing)
       if (paymentId) {
-        db.prepare("UPDATE payments SET order_id = ?, mess_id = ? WHERE razorpay_payment_id = ?")
-          .run(orderId, messId, paymentId);
+        await client.query(
+          "UPDATE payments SET order_id = $1, mess_id = $2 WHERE razorpay_payment_id = $3",
+          [orderId, messId, paymentId]
+        );
       }
 
       // Create notification (with explicit is_read = 0)
-      const messName = db.prepare('SELECT name FROM messes WHERE id = ?').get(messId)?.name;
-      db.prepare("INSERT INTO notifications (user_id, type, message, is_read) VALUES (?, 'success', ?, 0)")
-        .run(req.user.id, `Your order #${orderId} has been placed at ${messName}`);
-    });
+      const { rows: messRows } = await client.query('SELECT name FROM messes WHERE id = $1', [messId]);
+      const messName = messRows[0]?.name;
+      await client.query(
+        "INSERT INTO notifications (user_id, type, message, is_read) VALUES ($1, 'success', $2, 0)",
+        [req.user.id, `Your order #${orderId} has been placed at ${messName}`]
+      );
 
-    placeOrderTx();
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
 
     res.status(201).json({ success: true, orderId });
   } catch (err) {
@@ -267,16 +310,17 @@ exports.placeOrder = (req, res) => {
 /**
  * GET /api/student/subscription
  */
-exports.getSubscription = (req, res) => {
+exports.getSubscription = async (req, res) => {
   try {
-    const sub = db.prepare(`
+    const { rows } = await query(`
       SELECT s.*, m.name as mess_name, p.name as plan_name
       FROM subscriptions s
       JOIN messes m ON m.id = s.mess_id
       JOIN plans p ON p.id = s.plan_id
-      WHERE s.user_id = ? AND s.status = 'active'
+      WHERE s.user_id = $1 AND s.status = 'active'
       ORDER BY s.created_at DESC LIMIT 1
-    `).get(req.user.id);
+    `, [req.user.id]);
+    const sub = rows[0];
 
     if (!sub) {
       return res.json({ isActive: false });
@@ -305,7 +349,7 @@ exports.getSubscription = (req, res) => {
 /**
  * POST /api/student/subscription/subscribe
  */
-exports.subscribe = (req, res) => {
+exports.subscribe = async (req, res) => {
   try {
     const { planId, messId } = req.body;
 
@@ -313,13 +357,31 @@ exports.subscribe = (req, res) => {
       return res.status(400).json({ error: 'Plan ID and Mess ID are required.' });
     }
 
+    const { paymentId } = req.body;
+    if (!paymentId) {
+      return res.status(400).json({ error: 'Payment required to activate subscription.' });
+    }
+
+    // Verify the payment exists and was captured
+    const { rows: paymentRows } = await query(
+      "SELECT * FROM payments WHERE razorpay_payment_id = $1 AND status = 'captured'",
+      [paymentId]
+    );
+    if (!paymentRows[0]) {
+      return res.status(400).json({ error: 'Valid payment not found. Complete payment before subscribing.' });
+    }
+
     // Check if already has active sub
-    const existing = db.prepare("SELECT id FROM subscriptions WHERE user_id = ? AND status = 'active'").get(req.user.id);
-    if (existing) {
+    const { rows: existingRows } = await query(
+      "SELECT id FROM subscriptions WHERE user_id = $1 AND status = 'active'",
+      [req.user.id]
+    );
+    if (existingRows[0]) {
       return res.status(400).json({ error: 'You already have an active subscription. Cancel it first.' });
     }
 
-    const plan = db.prepare('SELECT * FROM plans WHERE id = ? AND mess_id = ?').get(planId, messId);
+    const { rows: planRows } = await query('SELECT * FROM plans WHERE id = $1 AND mess_id = $2', [planId, messId]);
+    const plan = planRows[0];
     if (!plan) {
       return res.status(404).json({ error: 'Plan not found.' });
     }
@@ -329,21 +391,30 @@ exports.subscribe = (req, res) => {
     expiresDate.setDate(expiresDate.getDate() + 30);
     const expiresAt = expiresDate.toISOString().split('T')[0];
 
-    const result = db.prepare(`
+    const { rows: insertRows } = await query(`
       INSERT INTO subscriptions (user_id, mess_id, plan_id, meals_remaining, total_meals, status, starts_at, expires_at)
-      VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
-    `).run(req.user.id, messId, planId, plan.total_meals, plan.total_meals, startsAt, expiresAt);
+      VALUES ($1, $2, $3, $4, $5, 'active', $6, $7)
+      RETURNING id
+    `, [req.user.id, messId, planId, plan.total_meals, plan.total_meals, startsAt, expiresAt]);
+    const subscriptionId = insertRows[0].id;
+
+    await query(
+      "UPDATE payments SET type = 'subscription' WHERE razorpay_payment_id = $1",
+      [paymentId]
+    );
 
     // Update user's mess_id
-    db.prepare('UPDATE users SET mess_id = ? WHERE id = ?').run(messId, req.user.id);
+    await query('UPDATE users SET mess_id = $1 WHERE id = $2', [messId, req.user.id]);
 
     // Notification
-    db.prepare("INSERT INTO notifications (user_id, type, message) VALUES (?, 'success', ?)")
-      .run(req.user.id, `You are now subscribed to ${plan.name}! Enjoy your meals.`);
+    await query(
+      "INSERT INTO notifications (user_id, type, message) VALUES ($1, 'success', $2)",
+      [req.user.id, `You are now subscribed to ${plan.name}! Enjoy your meals.`]
+    );
 
     res.status(201).json({
       success: true,
-      subscriptionId: result.lastInsertRowid,
+      subscriptionId,
       message: 'Subscription activated successfully.'
     });
   } catch (err) {
@@ -355,15 +426,15 @@ exports.subscribe = (req, res) => {
 /**
  * GET /api/student/attendance?month=2026-05
  */
-exports.getAttendance = (req, res) => {
+exports.getAttendance = async (req, res) => {
   try {
     const month = req.query.month || todayDate().substring(0, 7); // YYYY-MM
 
-    const records = db.prepare(`
+    const { rows: records } = await query(`
       SELECT * FROM attendance
-      WHERE user_id = ? AND date LIKE ?
+      WHERE user_id = $1 AND TO_CHAR(date, 'YYYY-MM') = $2
       ORDER BY date ASC
-    `).all(req.user.id, `${month}%`);
+    `, [req.user.id, month]);
 
     res.json(records.map(r => ({
       id: r.id,
@@ -380,14 +451,14 @@ exports.getAttendance = (req, res) => {
 /**
  * GET /api/student/notifications
  */
-exports.getNotifications = (req, res) => {
+exports.getNotifications = async (req, res) => {
   try {
-    const notifications = db.prepare(`
+    const { rows: notifications } = await query(`
       SELECT * FROM notifications
-      WHERE user_id = ?
+      WHERE user_id = $1
       ORDER BY created_at DESC
       LIMIT 20
-    `).all(req.user.id);
+    `, [req.user.id]);
 
     res.json(notifications.map(n => ({
       id: n.id,
@@ -405,10 +476,12 @@ exports.getNotifications = (req, res) => {
 /**
  * PUT /api/student/notifications/:id/read
  */
-exports.markNotificationRead = (req, res) => {
+exports.markNotificationRead = async (req, res) => {
   try {
-    db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?')
-      .run(req.params.id, req.user.id);
+    await query(
+      'UPDATE notifications SET is_read = 1 WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
     res.json({ success: true });
   } catch (err) {
     console.error('markNotificationRead error:', err);
@@ -419,9 +492,9 @@ exports.markNotificationRead = (req, res) => {
 /**
  * PUT /api/student/notifications/read-all
  */
-exports.markAllNotificationsRead = (req, res) => {
+exports.markAllNotificationsRead = async (req, res) => {
   try {
-    db.prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ?').run(req.user.id);
+    await query('UPDATE notifications SET is_read = 1 WHERE user_id = $1', [req.user.id]);
     res.json({ success: true });
   } catch (err) {
     console.error('markAllNotificationsRead error:', err);
@@ -432,9 +505,9 @@ exports.markAllNotificationsRead = (req, res) => {
 /**
  * DELETE /api/student/notifications/clear-read
  */
-exports.clearReadNotifications = (req, res) => {
+exports.clearReadNotifications = async (req, res) => {
   try {
-    db.prepare('DELETE FROM notifications WHERE user_id = ? AND is_read = 1').run(req.user.id);
+    await query('DELETE FROM notifications WHERE user_id = $1 AND is_read = 1', [req.user.id]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to clear notifications.' });
@@ -444,7 +517,7 @@ exports.clearReadNotifications = (req, res) => {
 /**
  * POST /api/student/reviews
  */
-exports.submitReview = (req, res) => {
+exports.submitReview = async (req, res) => {
   try {
     const { orderId, menuItemId, rating, comment } = req.body;
 
@@ -453,29 +526,39 @@ exports.submitReview = (req, res) => {
     }
 
     // Verify the order belongs to this user and is completed
-    const order = db.prepare("SELECT * FROM orders WHERE id = ? AND user_id = ? AND status = 'Completed'")
-      .get(orderId, req.user.id);
+    const { rows: orderRows } = await query(
+      "SELECT * FROM orders WHERE id = $1 AND user_id = $2 AND status = 'Completed'",
+      [orderId, req.user.id]
+    );
+    const order = orderRows[0];
     if (!order) {
       return res.status(400).json({ error: 'Can only review completed orders.' });
     }
 
     // Check for duplicate review
-    const existing = db.prepare('SELECT id FROM reviews WHERE user_id = ? AND order_id = ? AND menu_item_id = ?')
-      .get(req.user.id, orderId, menuItemId);
-    if (existing) {
+    const { rows: existingRows } = await query(
+      'SELECT id FROM reviews WHERE user_id = $1 AND order_id = $2 AND menu_item_id = $3',
+      [req.user.id, orderId, menuItemId]
+    );
+    if (existingRows[0]) {
       return res.status(409).json({ error: 'You have already reviewed this item for this order.' });
     }
 
-    db.prepare(`
+    await query(`
       INSERT INTO reviews (user_id, order_id, menu_item_id, mess_id, rating, comment)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(req.user.id, orderId, menuItemId, order.mess_id, rating, comment || null);
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `, [req.user.id, orderId, menuItemId, order.mess_id, rating, comment || null]);
 
     // Update mess aggregate rating
-    const stats = db.prepare('SELECT AVG(rating) as avg_rating, COUNT(*) as count FROM reviews WHERE mess_id = ?')
-      .get(order.mess_id);
-    db.prepare('UPDATE messes SET rating = ROUND(?, 1), reviews_count = ? WHERE id = ?')
-      .run(stats.avg_rating, stats.count, order.mess_id);
+    const { rows: statsRows } = await query(
+      'SELECT AVG(rating) as avg_rating, COUNT(*) as count FROM reviews WHERE mess_id = $1',
+      [order.mess_id]
+    );
+    const stats = statsRows[0];
+    await query(
+      'UPDATE messes SET rating = ROUND($1::numeric, 1), reviews_count = $2 WHERE id = $3',
+      [stats.avg_rating, stats.count, order.mess_id]
+    );
 
     res.status(201).json({ success: true, message: 'Review submitted.' });
   } catch (err) {
@@ -483,3 +566,86 @@ exports.submitReview = (req, res) => {
     res.status(500).json({ error: 'Failed to submit review.' });
   }
 };
+
+// ============================================================
+// SETTINGS (change name, reset password)
+// ============================================================
+
+/**
+ * PUT /api/student/profile/name
+ */
+exports.updateName = async (req, res) => {
+  const { name } = req.body;
+  if (!name || name.trim().length < 2) {
+    return res.status(400).json({ message: 'Name must be at least 2 characters.' });
+  }
+  try {
+    await query(
+      'UPDATE users SET name = $1 WHERE id = $2',
+      [name.trim(), req.user.id]
+    );
+    res.json({ message: 'Name updated successfully.' });
+  } catch (e) {
+    res.status(500).json({ message: 'Failed to update name.' });
+  }
+};
+
+/**
+ * PUT /api/student/profile/password
+ */
+exports.resetPassword = async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ message: 'Both current and new password are required.' });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ message: 'New password must be at least 6 characters.' });
+  }
+  try {
+    const { rows } = await query('SELECT password FROM users WHERE id = $1', [req.user.id]);
+    const user = rows[0];
+    const valid = await bcrypt.compare(currentPassword, user.password);
+    if (!valid) {
+      return res.status(401).json({ message: 'Current password is incorrect.' });
+    }
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await query('UPDATE users SET password = $1 WHERE id = $2', [hashed, req.user.id]);
+    res.json({ message: 'Password updated successfully.' });
+  } catch (e) {
+    res.status(500).json({ message: 'Failed to update password.' });
+  }
+};
+
+/**
+ * GET /api/student/orders/by-date?date=YYYY-MM-DD
+ */
+exports.getOrdersByDate = async (req, res) => {
+  const { date } = req.query;
+  if (!date) return res.status(400).json({ error: 'date query param required. Format: YYYY-MM-DD' });
+  try {
+    const { rows: orders } = await query(`
+      SELECT
+        o.id, o.meal_type, o.slot_time, o.order_type,
+        o.total, o.status, o.payment_method, o.created_at,
+        m.name AS mess_name
+      FROM orders o
+      LEFT JOIN messes m ON o.mess_id = m.id
+      WHERE o.user_id = $1 AND o.created_at::date = $2::date
+      ORDER BY o.created_at ASC
+    `, [req.user.id, date]);
+
+    const result = await Promise.all(orders.map(async (order) => {
+      const { rows: items } = await query(
+        'SELECT name, quantity, price FROM order_items WHERE order_id = $1',
+        [order.id]
+      );
+      return { ...order, items };
+    }));
+
+    res.json(result);
+  } catch (e) {
+    console.error('getOrdersByDate error:', e);
+    res.status(500).json({ error: 'Failed to fetch orders by date.' });
+  }
+};
+

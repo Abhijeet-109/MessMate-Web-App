@@ -1,4 +1,4 @@
-const db = require('../config/db');
+const { query } = require('../config/db');
 const { razorpay, verifyPaymentSignature, verifyWebhookSignature } = require('../utils/razorpay');
 
 /**
@@ -22,10 +22,10 @@ exports.createOrder = async (req, res) => {
     const razorpayOrder = await razorpay.orders.create(options);
 
     // Store payment record
-    db.prepare(`
+    await query(`
       INSERT INTO payments (order_id, user_id, mess_id, razorpay_order_id, amount, status, type)
-      VALUES (?, ?, ?, ?, ?, 'created', ?)
-    `).run(orderId || null, req.user.id, messId || null, razorpayOrder.id, amount, type || 'order');
+      VALUES ($1, $2, $3, $4, $5, 'created', $6)
+    `, [orderId || null, req.user.id, messId || null, razorpayOrder.id, amount, type || 'order']);
 
     res.json({
       razorpay_order_id: razorpayOrder.id,
@@ -43,7 +43,7 @@ exports.createOrder = async (req, res) => {
  * POST /api/payment/verify
  * Verifies Razorpay payment signature after frontend checkout
  */
-exports.verifyPayment = (req, res) => {
+exports.verifyPayment = async (req, res) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
@@ -55,27 +55,35 @@ exports.verifyPayment = (req, res) => {
 
     if (!isValid) {
       // Mark payment as failed
-      db.prepare("UPDATE payments SET status = 'failed' WHERE razorpay_order_id = ?")
-        .run(razorpay_order_id);
+      await query(
+        "UPDATE payments SET status = 'failed' WHERE razorpay_order_id = $1",
+        [razorpay_order_id]
+      );
       return res.status(400).json({ error: 'Payment verification failed. Invalid signature.' });
     }
 
     // Mark payment as captured
-    db.prepare(`
+    await query(`
       UPDATE payments SET
         status = 'captured',
-        razorpay_payment_id = ?,
-        razorpay_signature = ?
-      WHERE razorpay_order_id = ?
-    `).run(razorpay_payment_id, razorpay_signature, razorpay_order_id);
+        razorpay_payment_id = $1,
+        razorpay_signature = $2
+      WHERE razorpay_order_id = $3
+    `, [razorpay_payment_id, razorpay_signature, razorpay_order_id]);
 
     // Get payment record to update associated order
-    const payment = db.prepare('SELECT * FROM payments WHERE razorpay_order_id = ?').get(razorpay_order_id);
+    const { rows: paymentRows } = await query(
+      'SELECT * FROM payments WHERE razorpay_order_id = $1',
+      [razorpay_order_id]
+    );
+    const payment = paymentRows[0];
 
     if (payment && payment.order_id) {
       // Update order status to Placed (confirmed payment)
-      db.prepare("UPDATE orders SET payment_id = ?, status = 'Placed', updated_at = datetime('now') WHERE id = ?")
-        .run(razorpay_payment_id, payment.order_id);
+      await query(
+        "UPDATE orders SET payment_id = $1, status = 'Placed', updated_at = NOW() WHERE id = $2",
+        [razorpay_payment_id, payment.order_id]
+      );
     }
 
     res.json({
@@ -94,7 +102,7 @@ exports.verifyPayment = (req, res) => {
  * Razorpay webhook handler (backup verification)
  * No auth middleware — uses webhook signature verification
  */
-exports.webhook = (req, res) => {
+exports.webhook = async (req, res) => {
   try {
     const signature = req.headers['x-razorpay-signature'];
     const body = JSON.stringify(req.body);
@@ -113,14 +121,22 @@ exports.webhook = (req, res) => {
       const razorpayPaymentId = paymentEntity.id;
 
       // Update payment record
-      db.prepare("UPDATE payments SET status = 'captured', razorpay_payment_id = ? WHERE razorpay_order_id = ?")
-        .run(razorpayPaymentId, razorpayOrderId);
+      await query(
+        "UPDATE payments SET status = 'captured', razorpay_payment_id = $1 WHERE razorpay_order_id = $2",
+        [razorpayPaymentId, razorpayOrderId]
+      );
 
       // Update associated order
-      const payment = db.prepare('SELECT order_id FROM payments WHERE razorpay_order_id = ?').get(razorpayOrderId);
+      const { rows: paymentRows } = await query(
+        'SELECT order_id FROM payments WHERE razorpay_order_id = $1',
+        [razorpayOrderId]
+      );
+      const payment = paymentRows[0];
       if (payment?.order_id) {
-        db.prepare("UPDATE orders SET payment_id = ?, status = 'Placed', updated_at = datetime('now') WHERE id = ?")
-          .run(razorpayPaymentId, payment.order_id);
+        await query(
+          "UPDATE orders SET payment_id = $1, status = 'Placed', updated_at = NOW() WHERE id = $2",
+          [razorpayPaymentId, payment.order_id]
+        );
       }
     }
 

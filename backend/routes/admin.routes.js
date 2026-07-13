@@ -61,4 +61,9 @@ router.post('/plans', adminController.addPlan);
 router.put('/plans/:id', adminController.updatePlan);
 router.delete('/plans/:id', adminController.deletePlan);
 
+// Owner profile settings
+router.put('/profile/name', adminController.updateOwnerName);
+router.put('/profile/password', adminController.resetOwnerPassword);
+router.put('/mess/details', adminController.updateMessDetails);
+
 module.exports = router;

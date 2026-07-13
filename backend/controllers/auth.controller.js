@@ -1,4 +1,4 @@
-const db = require('../config/db');
+const { query, getClient } = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
@@ -6,7 +6,7 @@ const jwt = require('jsonwebtoken');
  * POST /api/auth/register
  * Register a new student account
  */
-exports.register = (req, res) => {
+exports.register = async (req, res) => {
   try {
     const { name, email, password, phone, college } = req.body;
 
@@ -14,9 +14,13 @@ exports.register = (req, res) => {
       return res.status(400).json({ error: 'Name, email, and password are required.' });
     }
 
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+    }
+
     // Check if user already exists
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-    if (existing) {
+    const { rows: existingRows } = await query('SELECT id FROM users WHERE email = $1', [email]);
+    if (existingRows[0]) {
       return res.status(409).json({ error: 'Email already registered.' });
     }
 
@@ -25,21 +29,26 @@ exports.register = (req, res) => {
     const hashedPassword = bcrypt.hashSync(password, salt);
 
     // Insert user
-    const result = db.prepare(`
+    const { rows: insertRows } = await query(`
       INSERT INTO users (name, email, password, phone, college, role)
-      VALUES (?, ?, ?, ?, ?, 'student')
-    `).run(name, email, hashedPassword, phone || null, college || null);
+      VALUES ($1, $2, $3, $4, $5, 'student')
+      RETURNING id
+    `, [name, email, hashedPassword, phone || null, college || null]);
+    const newId = insertRows[0].id;
 
     // Generate JWT
     const token = jwt.sign(
-      { id: result.lastInsertRowid, email, role: 'student', mess_id: null },
+      { id: newId, email, role: 'student', mess_id: null },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
     // Return user data (matching frontend MOCK_USER shape)
-    const user = db.prepare('SELECT id, name, email, phone, college, role, mess_id, is_active FROM users WHERE id = ?')
-      .get(result.lastInsertRowid);
+    const { rows: userRows } = await query(
+      'SELECT id, name, email, phone, college, role, mess_id, is_active FROM users WHERE id = $1',
+      [newId]
+    );
+    const user = userRows[0];
 
     res.status(201).json({ token, user });
   } catch (err) {
@@ -52,7 +61,7 @@ exports.register = (req, res) => {
  * POST /api/auth/login
  * Login for both student and admin (role determined from DB)
  */
-exports.login = (req, res) => {
+exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -61,7 +70,8 @@ exports.login = (req, res) => {
     }
 
     // Find user
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    const { rows: userRows } = await query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = userRows[0];
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
@@ -96,18 +106,20 @@ exports.login = (req, res) => {
 
     // If student, attach subscription info
     if (user.role === 'student') {
-      const sub = db.prepare(`
+      const { rows: subRows } = await query(`
         SELECT s.*, m.name as mess_name
         FROM subscriptions s
         JOIN messes m ON m.id = s.mess_id
-        WHERE s.user_id = ? AND s.status = 'active'
+        WHERE s.user_id = $1 AND s.status = 'active'
         ORDER BY s.created_at DESC LIMIT 1
-      `).get(user.id);
+      `, [user.id]);
+      const sub = subRows[0];
 
       if (sub) {
+        const { rows: planRows } = await query('SELECT name FROM plans WHERE id = $1', [sub.plan_id]);
         userData.subscription = {
           isActive: true,
-          planName: db.prepare('SELECT name FROM plans WHERE id = ?').get(sub.plan_id)?.name,
+          planName: planRows[0]?.name,
           messId: sub.mess_id,
           messName: sub.mess_name,
           mealsRemaining: sub.meals_remaining,
@@ -137,7 +149,7 @@ exports.login = (req, res) => {
  * POST /api/auth/register-owner
  * Register a new mess owner account + create a mess
  */
-exports.registerOwner = (req, res) => {
+exports.registerOwner = async (req, res) => {
   try {
     const { name, email, password, phone, messName, messLocation, messContact } = req.body;
 
@@ -145,9 +157,13 @@ exports.registerOwner = (req, res) => {
       return res.status(400).json({ error: 'Name, email, password, and mess name are required.' });
     }
 
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+    }
+
     // Check if user already exists
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-    if (existing) {
+    const { rows: existingRows } = await query('SELECT id FROM users WHERE email = $1', [email]);
+    if (existingRows[0]) {
       return res.status(409).json({ error: 'Email already registered.' });
     }
 
@@ -159,23 +175,32 @@ exports.registerOwner = (req, res) => {
     const messId = `m${Date.now()}`;
 
     // Use a transaction to create both user and mess atomically
-    const createOwner = db.transaction(() => {
+    const client = await getClient();
+    let userId;
+    try {
+      await client.query('BEGIN');
+
       // Create user with admin role
-      const userResult = db.prepare(`
+      const userResult = await client.query(`
         INSERT INTO users (name, email, password, phone, role, mess_id)
-        VALUES (?, ?, ?, ?, 'admin', ?)
-      `).run(name, email, hashedPassword, phone || null, messId);
+        VALUES ($1, $2, $3, $4, 'admin', $5)
+        RETURNING id
+      `, [name, email, hashedPassword, phone || null, messId]);
+      userId = userResult.rows[0].id;
 
       // Create mess record
-      db.prepare(`
+      await client.query(`
         INSERT INTO messes (id, name, owner_id, location, contact, is_open)
-        VALUES (?, ?, ?, ?, ?, 1)
-      `).run(messId, messName, userResult.lastInsertRowid, messLocation || null, messContact || null);
+        VALUES ($1, $2, $3, $4, $5, 1)
+      `, [messId, messName, userId, messLocation || null, messContact || null]);
 
-      return userResult.lastInsertRowid;
-    });
-
-    const userId = createOwner();
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
 
     // Generate JWT
     const token = jwt.sign(
@@ -184,7 +209,11 @@ exports.registerOwner = (req, res) => {
       { expiresIn: '7d' }
     );
 
-    const user = db.prepare('SELECT id, name, email, phone, role, mess_id FROM users WHERE id = ?').get(userId);
+    const { rows: userRows } = await query(
+      'SELECT id, name, email, phone, role, mess_id FROM users WHERE id = $1',
+      [userId]
+    );
+    const user = userRows[0];
 
     res.status(201).json({
       token,
@@ -193,5 +222,26 @@ exports.registerOwner = (req, res) => {
   } catch (err) {
     console.error('Register owner error:', err);
     res.status(500).json({ error: 'Owner registration failed.' });
+  }
+};
+
+exports.refreshToken = async (req, res) => {
+  try {
+    const { rows } = await query(
+      'SELECT id, email, role, mess_id, is_active FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const user = rows[0];
+    if (!user || !user.is_active) {
+      return res.status(401).json({ error: 'Account not found or deactivated.' });
+    }
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role, mess_id: user.mess_id },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    res.json({ token });
+  } catch (err) {
+    res.status(500).json({ error: 'Token refresh failed.' });
   }
 };
